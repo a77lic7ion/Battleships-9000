@@ -50,21 +50,43 @@ export function isShipSunk(ship: PlacedShip): boolean {
   return ship.hits >= ship.size;
 }
 
+/**
+ * Refactored AI Shot Logic:
+ * Now uses a multi-stage hunting strategy applied to all difficulty levels.
+ * 1. Identify "Active Hits": Successful hits on ships that are not yet fully sunk.
+ * 2. If active hits exist, prioritize targeting the ends of the line (if 2+ hits) or neighbors.
+ * 3. If no active hits, use difficulty-based search patterns (e.g., checkerboard).
+ */
 export function getAIShot(playerGrid: CellState[][], difficulty: string): {x: number, y: number} {
   const isAvailable = (x: number, y: number) => {
-    const status = playerGrid[y][x].status;
-    return status !== 'hit' && status !== 'miss';
+    if (x < 0 || x >= GRID_SIZE || y < 0 || y >= GRID_SIZE) return false;
+    const cell = playerGrid[y][x];
+    return cell.status !== 'hit' && cell.status !== 'miss';
   };
 
-  const getHitsWithoutSunk = () => {
-    const hits: {x: number, y: number}[] = [];
+  const getActiveHits = () => {
+    const hits: {x: number, y: number, type: ShipType}[] = [];
+    const typeHits: Record<string, number> = {};
+    
+    // Pass 1: Count hits per ship type on the board
     for (let y = 0; y < GRID_SIZE; y++) {
       for (let x = 0; x < GRID_SIZE; x++) {
-        if (playerGrid[y][x].status === 'hit') {
-          // Verify if this hit belongs to a ship that isn't fully sunk yet
-          // In this implementation, we can just check if any neighbor is available
-          // or if it's a standalone hit.
-          hits.push({ x, y });
+        const cell = playerGrid[y][x];
+        if (cell.status === 'hit' && cell.shipType) {
+          typeHits[cell.shipType] = (typeHits[cell.shipType] || 0) + 1;
+        }
+      }
+    }
+
+    // Pass 2: Collect hits belonging to ships that are not yet sunk
+    for (let y = 0; y < GRID_SIZE; y++) {
+      for (let x = 0; x < GRID_SIZE; x++) {
+        const cell = playerGrid[y][x];
+        if (cell.status === 'hit' && cell.shipType) {
+          const shipConfig = SHIPS[cell.shipType];
+          if (typeHits[cell.shipType] < shipConfig.size) {
+            hits.push({ x, y, type: cell.shipType });
+          }
         }
       }
     }
@@ -72,65 +94,95 @@ export function getAIShot(playerGrid: CellState[][], difficulty: string): {x: nu
   };
 
   const huntTarget = () => {
-    const hits = getHitsWithoutSunk();
-    for (const hit of hits) {
-      const neighbors = [
-        { x: hit.x + 1, y: hit.y },
-        { x: hit.x - 1, y: hit.y },
-        { x: hit.x, y: hit.y + 1 },
-        { x: hit.x, y: hit.y - 1 },
-      ];
-      for (const n of neighbors) {
-        if (n.x >= 0 && n.x < GRID_SIZE && n.y >= 0 && n.y < GRID_SIZE && isAvailable(n.x, n.y)) {
-          return n;
+    const activeHits = getActiveHits();
+    if (activeHits.length === 0) return null;
+
+    // Group active hits by ship type
+    const hitsByType: Record<string, typeof activeHits> = {};
+    activeHits.forEach(h => {
+      if (!hitsByType[h.type]) hitsByType[h.type] = [];
+      hitsByType[h.type].push(h);
+    });
+
+    // Try to finish ships one by one
+    for (const type of Object.keys(hitsByType)) {
+      const shipHits = hitsByType[type];
+      
+      // If we have 2 or more hits on the same ship, we can guess the orientation
+      if (shipHits.length >= 2) {
+        const h0 = shipHits[0];
+        const h1 = shipHits[1];
+        const isHorizontal = h0.y === h1.y;
+
+        const xs = shipHits.map(h => h.x);
+        const ys = shipHits.map(h => h.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+
+        if (isHorizontal) {
+          // Check ends of horizontal line
+          if (isAvailable(maxX + 1, minY)) return { x: maxX + 1, y: minY };
+          if (isAvailable(minX - 1, minY)) return { x: minX - 1, y: minY };
+        } else {
+          // Check ends of vertical line
+          if (isAvailable(minX, maxY + 1)) return { x: minX, y: maxY + 1 };
+          if (isAvailable(minX, minY - 1)) return { x: minX, y: minY - 1 };
         }
       }
+
+      // Fallback: search neighbors of any hit of this ship
+      // Shuffling neighbors to avoid predictable patterns
+      const allNeighbors: {x: number, y: number}[] = [];
+      shipHits.forEach(hit => {
+        allNeighbors.push({ x: hit.x + 1, y: hit.y });
+        allNeighbors.push({ x: hit.x - 1, y: hit.y });
+        allNeighbors.push({ x: hit.x, y: hit.y + 1 });
+        allNeighbors.push({ x: hit.x, y: hit.y - 1 });
+      });
+
+      allNeighbors.sort(() => Math.random() - 0.5);
+      for (const n of allNeighbors) {
+        if (isAvailable(n.x, n.y)) return n;
+      }
     }
+
     return null;
   };
 
-  // 1. Easy: Pure Random
-  if (difficulty === 'easy') {
-    while (true) {
-      const x = Math.floor(Math.random() * GRID_SIZE);
-      const y = Math.floor(Math.random() * GRID_SIZE);
-      if (isAvailable(x, y)) return { x, y };
-    }
-  }
+  // Execution:
+  // 1. Always check for a hunt target (partially hit ships)
+  const target = huntTarget();
+  if (target) return target;
 
-  // 2. Medium: Random + Adjacent Hunt
-  if (difficulty === 'medium') {
-    const target = huntTarget();
-    if (target) return target;
-
-    while (true) {
-      const x = Math.floor(Math.random() * GRID_SIZE);
-      const y = Math.floor(Math.random() * GRID_SIZE);
-      if (isAvailable(x, y)) return { x, y };
-    }
-  }
-
-  // 3. Hard: Checkerboard Strategy + Aggressive Hunt
+  // 2. If no hunt target, use search strategy based on difficulty
   if (difficulty === 'hard') {
-    const target = huntTarget();
-    if (target) return target;
-
-    // Preference for checkerboard pattern to find ships faster
+    // Parity/Checkerboard search: Target only (x+y)%2 cells for maximum efficiency
     let attempts = 0;
-    while (attempts < 100) {
+    while (attempts < 200) {
       const x = Math.floor(Math.random() * GRID_SIZE);
       const y = Math.floor(Math.random() * GRID_SIZE);
       if ((x + y) % 2 === 0 && isAvailable(x, y)) return { x, y };
       attempts++;
     }
+  }
 
-    // Fallback to any available cell
-    while (true) {
+  if (difficulty === 'medium') {
+    // Medium has a small bias towards patterns but mostly random search
+    let attempts = 0;
+    while (attempts < 50) {
       const x = Math.floor(Math.random() * GRID_SIZE);
       const y = Math.floor(Math.random() * GRID_SIZE);
-      if (isAvailable(x, y)) return { x, y };
+      if ((x + y) % 2 === 0 && isAvailable(x, y)) return { x, y };
+      attempts++;
     }
   }
 
-  return { x: 0, y: 0 };
+  // 3. Absolute fallback: Random selection
+  while (true) {
+    const x = Math.floor(Math.random() * GRID_SIZE);
+    const y = Math.floor(Math.random() * GRID_SIZE);
+    if (isAvailable(x, y)) return { x, y };
+  }
 }

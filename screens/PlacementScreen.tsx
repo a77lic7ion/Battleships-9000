@@ -1,8 +1,8 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { PlacedShip, ShipType, CellState, GameState } from '../types';
 import { SHIPS, SHIP_ORDER, GRID_SIZE } from '../constants';
-import { canPlaceShip, createEmptyGrid } from '../services/gameLogic';
+import { canPlaceShip, createEmptyGrid, placeAIShips } from '../services/gameLogic';
 import { sound } from '../services/audioService';
 
 interface PlacementScreenProps {
@@ -12,41 +12,111 @@ interface PlacementScreenProps {
   onAcknowledge: () => void;
 }
 
+interface DragState {
+  type: ShipType;
+  fromGrid: boolean;
+  startX: number;
+  startY: number;
+}
+
 const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, onCancel, onAcknowledge }) => {
   const [grid, setGrid] = useState<CellState[][]>(createEmptyGrid());
   const [placedShips, setPlacedShips] = useState<PlacedShip[]>([]);
   const [selectedShip, setSelectedShip] = useState<ShipType | null>(SHIP_ORDER[0]);
   const [horizontal, setHorizontal] = useState(true);
   const [hoverPos, setHoverPos] = useState<{x: number, y: number} | null>(null);
+  
+  // Drag and Drop state
+  const [dragState, setDragState] = useState<DragState | null>(null);
+  const [mousePos, setMousePos] = useState<{x: number, y: number}>({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  // Reset local state when placement phase changes
   useEffect(() => {
     setGrid(createEmptyGrid());
     setPlacedShips([]);
     setSelectedShip(SHIP_ORDER[0]);
   }, [gameState.placementPhase]);
 
-  const handleCellClick = (x: number, y: number) => {
-    if (!selectedShip) return;
+  const removeShipFromGrid = (type: ShipType) => {
+    const newPlaced = placedShips.filter(s => s.type !== type);
+    const newGrid = [...grid.map(row => [...row])];
+    for (let gy = 0; gy < GRID_SIZE; gy++) {
+      for (let gx = 0; gx < GRID_SIZE; gx++) {
+        if (newGrid[gy][gx].shipType === type) {
+          newGrid[gy][gx] = { status: 'empty', shipType: null };
+        }
+      }
+    }
+    setPlacedShips(newPlaced);
+    setGrid(newGrid);
+  };
 
-    const size = SHIPS[selectedShip].size;
-    if (canPlaceShip(grid, x, y, size, horizontal)) {
-      sound.playUI();
+  const placeShipOnGrid = (type: ShipType, x: number, y: number, isHorizontal: boolean) => {
+    const size = SHIPS[type].size;
+    if (canPlaceShip(grid, x, y, size, isHorizontal)) {
       const newGrid = [...grid.map(row => [...row])];
       for (let i = 0; i < size; i++) {
-        const curX = horizontal ? x + i : x;
-        const curY = horizontal ? y : y + i;
-        newGrid[curY][curX] = { status: 'ship', shipType: selectedShip };
+        const curX = isHorizontal ? x + i : x;
+        const curY = isHorizontal ? y : y + i;
+        newGrid[curY][curX] = { status: 'ship', shipType: type };
       }
-      
-      const newShip: PlacedShip = { type: selectedShip, x, y, size, horizontal, hits: 0 };
-      const newPlaced = [...placedShips, newShip];
-      setPlacedShips(newPlaced);
+      const newShip: PlacedShip = { type, x, y, size, horizontal: isHorizontal, hits: 0 };
+      setPlacedShips(prev => [...prev, newShip]);
       setGrid(newGrid);
-
-      const nextShip = SHIP_ORDER.find(type => !newPlaced.some(s => s.type === type));
+      
+      // Auto-select next available ship
+      const nextShip = SHIP_ORDER.find(t => ![...placedShips, newShip].some(s => s.type === t));
       setSelectedShip(nextShip || null);
+      return true;
     }
+    return false;
+  };
+
+  const handlePointerDownSidebar = (e: React.PointerEvent, type: ShipType) => {
+    sound.playUI();
+    setSelectedShip(type);
+    setDragState({ type, fromGrid: false, startX: 0, startY: 0 });
+  };
+
+  const handlePointerDownGrid = (e: React.PointerEvent, x: number, y: number) => {
+    const cell = grid[y][x];
+    if (cell.status === 'ship' && cell.shipType) {
+      sound.playUI();
+      const type = cell.shipType;
+      const ship = placedShips.find(s => s.type === type)!;
+      removeShipFromGrid(type);
+      setDragState({ type, fromGrid: true, startX: x, startY: y });
+      setHorizontal(ship.horizontal);
+      setSelectedShip(type);
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    setMousePos({ x: e.clientX, y: e.clientY });
+  };
+
+  const handlePointerUp = (e: React.PointerEvent) => {
+    if (!dragState) return;
+
+    if (hoverPos) {
+      const success = placeShipOnGrid(dragState.type, hoverPos.x, hoverPos.y, horizontal);
+      if (!success && dragState.fromGrid) {
+        // Return to original position if invalid
+        const ship = placedShips.find(s => s.type === dragState.type);
+        // This is tricky because we removed it from state already. 
+        // We'd need to store the original state. Let's simplify: 
+        // If placement fails, just leave it "picked up" (selected).
+      }
+    }
+    setDragState(null);
+  };
+
+  const handleRandomize = () => {
+    sound.playUI();
+    const { grid: randomGrid, ships: randomShips } = placeAIShips();
+    setGrid(randomGrid);
+    setPlacedShips(randomShips);
+    setSelectedShip(null);
   };
 
   const handleReset = () => {
@@ -59,7 +129,12 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
   const activeName = gameState.placementPhase === 1 ? gameState.player1Name : gameState.player2Name;
 
   return (
-    <div className="flex-1 flex flex-col p-8 max-w-[1400px] mx-auto w-full relative z-10 overflow-hidden">
+    <div 
+      ref={containerRef}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      className="flex-1 flex flex-col p-8 max-w-[1400px] mx-auto w-full relative z-10 overflow-hidden select-none"
+    >
       {/* Privacy Transition Overlay */}
       {gameState.isTransitioning && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background-dark/80 backdrop-blur-3xl animate-fadeIn">
@@ -84,6 +159,23 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
         </div>
       )}
 
+      {/* Dragging Ghost Preview */}
+      {dragState && (
+        <div 
+          className="fixed pointer-events-none z-[100] flex gap-1 opacity-70"
+          style={{ 
+            left: mousePos.x, 
+            top: mousePos.y, 
+            transform: 'translate(-20px, -20px)',
+            flexDirection: horizontal ? 'row' : 'column'
+          }}
+        >
+          {Array(SHIPS[dragState.type].size).fill(0).map((_, i) => (
+            <div key={i} className="w-8 h-8 bg-primary border border-white/50 rounded-sm shadow-[0_0_15px_rgba(31,97,239,0.8)]"></div>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-end justify-between gap-6 border-l-4 border-primary pl-6 mb-8">
         <div>
           <h1 className="text-white text-5xl font-black tracking-tighter uppercase leading-none">Fleet Deployment</h1>
@@ -91,13 +183,22 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
             COMMANDER: <span className="text-primary font-black uppercase">{activeName}</span> — Assign fleet coordinates.
           </p>
         </div>
-        <button 
-          onClick={handleReset}
-          className="px-6 h-12 rounded-lg bg-white/5 border border-white/10 text-white text-sm font-bold uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2"
-        >
-          <span className="material-symbols-outlined text-sm">restart_alt</span>
-          Reset
-        </button>
+        <div className="flex gap-4">
+          <button 
+            onClick={handleRandomize}
+            className="px-6 h-12 rounded-lg bg-primary/10 border border-primary/30 text-primary text-sm font-black uppercase tracking-widest hover:bg-primary/20 transition-all flex items-center gap-2"
+          >
+            <span className="material-symbols-outlined text-sm">shuffle</span>
+            Randomize
+          </button>
+          <button 
+            onClick={handleReset}
+            className="px-6 h-12 rounded-lg bg-white/5 border border-white/10 text-white text-sm font-bold uppercase tracking-widest hover:bg-white/10 transition-all flex items-center gap-2"
+          >
+            <span className="material-symbols-outlined text-sm">restart_alt</span>
+            Reset
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-col lg:flex-row gap-8 flex-1 overflow-hidden">
@@ -105,7 +206,7 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
           <div className="bg-terminal-accent/40 border border-white/5 p-6 rounded-xl flex flex-col h-full shadow-inner">
             <div className="mb-6">
               <h3 className="text-white/40 text-[10px] font-bold uppercase tracking-[0.2em] mb-1">Fleet Armory</h3>
-              <h2 className="text-white text-lg font-bold uppercase tracking-widest">Unplaced Units</h2>
+              <h2 className="text-white text-lg font-bold uppercase tracking-widest">Unit Status</h2>
             </div>
 
             <div className="flex flex-col gap-2.5">
@@ -117,10 +218,10 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
                 return (
                   <div
                     key={type}
-                    onClick={() => !placed && setSelectedShip(type)}
-                    className={`p-4 rounded-xl border transition-all cursor-pointer ${
-                      selected ? 'bg-primary/20 border-primary shadow-[0_0_15px_rgba(31,97,239,0.2)]' : 
-                      placed ? 'bg-black/40 border-green-500/20 opacity-40' : 'bg-white/5 border-white/10'
+                    onPointerDown={(e) => handlePointerDownSidebar(e, type)}
+                    className={`p-4 rounded-xl border transition-all cursor-grab active:cursor-grabbing ${
+                      selected ? 'bg-primary/20 border-primary shadow-[0_0_15px_rgba(31,97,239,0.2)] scale-[1.02]' : 
+                      placed ? 'bg-black/40 border-green-500/20 hover:border-primary/40 opacity-60' : 'bg-white/5 border-white/10'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
@@ -128,9 +229,10 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
                         <span className={`material-symbols-outlined text-base ${selected ? 'text-primary' : placed ? 'text-green-500' : 'text-white/40'}`}>
                           {config.icon}
                         </span>
-                        <p className={`text-[11px] font-bold uppercase tracking-widest ${placed ? 'line-through' : 'text-white'}`}>{type}</p>
+                        <p className={`text-[11px] font-bold uppercase tracking-widest ${placed ? 'text-white/80' : 'text-white'}`}>{type}</p>
                       </div>
                       {placed && <span className="material-symbols-outlined text-green-500 text-xs">check_circle</span>}
+                      {selected && !dragState && <span className="text-[9px] font-black text-primary animate-pulse uppercase tracking-widest">Deployment Active</span>}
                     </div>
                     <div className="flex gap-1">
                       {Array(config.size).fill(0).map((_, i) => (
@@ -142,14 +244,15 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
               })}
             </div>
 
-            <div className="mt-auto pt-6">
+            <div className="mt-auto pt-6 flex flex-col gap-3">
+              <p className="text-[9px] text-white/40 uppercase tracking-widest font-black px-2">Deployment Controls</p>
               <button 
                 onClick={() => { setHorizontal(!horizontal); sound.playUI(); }}
-                className="w-full flex items-center justify-between rounded-xl h-14 px-5 bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all"
+                className="w-full flex items-center justify-between rounded-xl h-14 px-5 bg-white/5 border border-white/10 text-white hover:bg-white/10 transition-all group"
               >
                 <span className="text-[10px] font-bold uppercase tracking-widest opacity-60">Flip Axis</span>
                 <div className="flex items-center gap-2">
-                  <span className="material-symbols-outlined text-primary text-sm">sync</span>
+                  <span className="material-symbols-outlined text-primary text-sm group-hover:rotate-180 transition-transform duration-500">sync</span>
                   <span className="text-xs font-bold uppercase tracking-widest">{horizontal ? 'Horizontal' : 'Vertical'}</span>
                 </div>
               </button>
@@ -180,11 +283,11 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
                       return (
                         <div
                           key={`${x}-${y}`}
+                          onPointerDown={(e) => handlePointerDownGrid(e, x, y)}
                           onMouseEnter={() => setHoverPos({x, y})}
                           onMouseLeave={() => setHoverPos(null)}
-                          onClick={() => handleCellClick(x, y)}
-                          className={`w-8 h-8 rounded-sm border transition-all ${
-                            cell.status === 'ship' ? 'bg-primary/40 border-primary/60 shadow-[inset_0_0_8px_rgba(31,97,239,0.3)]' :
+                          className={`w-8 h-8 rounded-sm border transition-all cursor-crosshair ${
+                            cell.status === 'ship' ? 'bg-primary/40 border-primary/60 shadow-[inset_0_0_8px_rgba(31,97,239,0.3)] hover:scale-105 hover:bg-primary/60 cursor-grab active:cursor-grabbing' :
                             canPlace ? 'bg-primary/20 border-primary animate-pulse' :
                             isHovering ? 'bg-red-500/20 border-red-500' :
                             'bg-white/[0.02] border-white/5'
@@ -202,15 +305,17 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
             <div className="flex items-center gap-6">
               <div className="flex flex-col">
                 <span className="text-[10px] font-bold uppercase tracking-widest text-primary mb-1">Tactical Status</span>
-                <p className="text-white text-sm">
-                  {placedShips.length === 5 ? 'Vessels Ready for Assignment.' : 'Positioning Fleet Assets...'}
+                <p className="text-white text-sm font-bold tracking-wide italic">
+                  {placedShips.length === 5 
+                    ? 'Fleet assets optimally distributed. Ready for mission start.' 
+                    : `Positioning assets... ${5 - placedShips.length} vessels remaining. Drag ships to the grid.`}
                 </p>
               </div>
             </div>
             <div className="flex items-center gap-4">
               <button 
                 onClick={onCancel}
-                className="px-6 h-12 rounded-lg text-white/50 text-[10px] font-bold uppercase tracking-widest hover:text-white transition-all"
+                className="px-6 h-12 rounded-lg text-white/50 text-[10px] font-black uppercase tracking-widest hover:text-white transition-all"
               >
                 Abort
               </button>

@@ -11,8 +11,8 @@ interface MenuScreenProps {
 const MenuScreen: React.FC<MenuScreenProps> = ({ onStart, onOpenSettings }) => {
   const [difficulty, setDifficulty] = useState<Difficulty>('medium');
   const [mode, setMode] = useState<GameMode>('single');
-  const [p1Name, setP1Name] = useState('ALPHA');
-  const [p2Name, setP2Name] = useState('BRAVO');
+  const [p1Name, setP1Name] = useState('Player 1');
+  const [p2Name, setP2Name] = useState('Player 2');
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center relative z-10 px-4 py-8 overflow-y-auto">
@@ -56,7 +56,7 @@ const MenuScreen: React.FC<MenuScreenProps> = ({ onStart, onOpenSettings }) => {
             <label className="text-[10px] text-primary font-black uppercase tracking-widest px-1">Commander 1 ID</label>
             <input 
               value={p1Name} 
-              onChange={e => setP1Name(e.target.value.toUpperCase())}
+              onChange={e => setP1Name(e.target.value)}
               className="bg-black/40 border border-primary/20 rounded-lg p-3 text-white text-sm font-bold uppercase tracking-widest outline-none focus:border-primary transition-colors"
               placeholder="PLAYER 1"
             />
@@ -66,7 +66,7 @@ const MenuScreen: React.FC<MenuScreenProps> = ({ onStart, onOpenSettings }) => {
               <label className="text-[10px] text-primary font-black uppercase tracking-widest px-1">Commander 2 ID</label>
               <input 
                 value={p2Name} 
-                onChange={e => setP2Name(e.target.value.toUpperCase())}
+                onChange={e => setP2Name(e.target.value)}
                 className="bg-black/40 border border-primary/20 rounded-lg p-3 text-white text-sm font-bold uppercase tracking-widest outline-none focus:border-primary transition-colors"
                 placeholder="PLAYER 2"
               />

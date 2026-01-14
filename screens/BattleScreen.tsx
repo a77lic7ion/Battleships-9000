@@ -26,10 +26,14 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
   };
 
   const isPlayerTurn = gameState.turn === 'player';
+  const isMulti = gameState.mode === 'multi';
+  
+  const showP1Perspective = !isMulti || isPlayerTurn;
   const activeName = isPlayerTurn ? gameState.player1Name : gameState.player2Name;
+  const headerName = !isMulti ? gameState.player1Name : activeName;
 
   const processAIShot = useCallback(() => {
-    if (gameState.turn !== 'ai' || gameState.winner || gameState.mode === 'multi') return;
+    if (gameState.turn !== 'ai' || gameState.winner || isMulti) return;
 
     const { x, y } = getAIShot(gameState.playerGrid, gameState.difficulty);
     const playerGrid = [...gameState.playerGrid.map(row => [...row])];
@@ -75,15 +79,15 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
       }));
     }
     aiFiringRef.current = false;
-  }, [gameState.turn, gameState.winner, gameState.mode, gameState.playerGrid, gameState.playerShips, gameState.difficulty, setState, addLog, onGameOver, checkGameOver]);
+  }, [gameState.turn, gameState.winner, isMulti, gameState.playerGrid, gameState.playerShips, gameState.difficulty, setState, addLog, onGameOver, checkGameOver]);
 
   useEffect(() => {
-    if (gameState.turn === 'ai' && !gameState.winner && !aiFiringRef.current && gameState.mode === 'single') {
+    if (gameState.turn === 'ai' && !gameState.winner && !aiFiringRef.current && !isMulti) {
       aiFiringRef.current = true;
       const timer = setTimeout(processAIShot, 1200);
       return () => clearTimeout(timer);
     }
-  }, [gameState.turn, gameState.winner, gameState.mode, processAIShot]);
+  }, [gameState.turn, gameState.winner, isMulti, processAIShot]);
 
   const handleStrike = (x: number, y: number) => {
     if (gameState.isTransitioning || gameState.winner) return;
@@ -134,7 +138,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
         [targetGridKey]: targetGrid, 
         [targetShipsKey]: targetShips, 
         turn: continueTurn ? prev.turn : (isPlayerTurn ? 'ai' : 'player'),
-        isTransitioning: !continueTurn && gameState.mode === 'multi'
+        isTransitioning: !continueTurn && isMulti
       }));
     }
   };
@@ -149,17 +153,17 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
     return total === 0 ? 0 : Math.round((hits / total) * 100);
   };
 
-  // Determine what each grid represents for the active player
-  const defensiveGrid = isPlayerTurn ? gameState.playerGrid : gameState.aiGrid;
-  const offensiveGrid = isPlayerTurn ? gameState.aiGrid : gameState.playerGrid;
-  const defensiveShips = isPlayerTurn ? gameState.playerShips : gameState.aiShips;
-  const offensiveShips = isPlayerTurn ? gameState.aiShips : gameState.playerShips;
+  const defensiveGrid = showP1Perspective ? gameState.playerGrid : gameState.aiGrid;
+  const offensiveGrid = showP1Perspective ? gameState.aiGrid : gameState.playerGrid;
+  const defensiveShips = showP1Perspective ? gameState.playerShips : gameState.aiShips;
+  const offensiveShips = showP1Perspective ? gameState.aiShips : gameState.playerShips;
+  const defensiveLabel = showP1Perspective ? gameState.player1Name : gameState.player2Name;
+  const offensiveLabel = showP1Perspective ? (isMulti ? gameState.player2Name : "ENEMY") : gameState.player1Name;
 
   return (
     <div className="flex-1 flex flex-col p-6 gap-6 relative z-10 overflow-hidden">
-      {/* Turn Transition Overlay */}
-      {gameState.isTransitioning && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background-dark/90 backdrop-blur-3xl animate-fadeIn">
+      {gameState.isTransitioning && isMulti && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background-dark/95 backdrop-blur-3xl animate-fadeIn">
           <div className="bg-terminal-accent/60 border border-primary/40 p-12 rounded-2xl flex flex-col items-center gap-8 shadow-2xl max-w-sm text-center">
             <span className="material-symbols-outlined text-7xl text-primary animate-pulse">sync_alt</span>
             <div>
@@ -188,56 +192,89 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
           </div>
           <div>
             <h1 className="text-xl font-bold tracking-widest uppercase italic">BATTLESHIPS 9K</h1>
-            <p className="text-[9px] text-primary/60 tracking-[0.3em] font-black uppercase">Active Operation: {gameState.mode === 'multi' ? 'PVP_LOCAL' : 'SOLO_INTEL'}</p>
+            <p className="text-[9px] text-primary/60 tracking-[0.3em] font-black uppercase">Active Operation: {isMulti ? 'PVP_LOCAL' : 'SOLO_INTEL'}</p>
           </div>
         </div>
         
         <div className={`relative flex items-center gap-4 px-8 py-2 rounded-full border transition-all duration-700 ${
-          isPlayerTurn ? 'bg-primary/10 border-primary shadow-[0_0_20px_rgba(31,97,239,0.2)]' : 'bg-red-500/10 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.2)]'
+          isPlayerTurn || !isMulti ? 'bg-primary/10 border-primary shadow-[0_0_20px_rgba(31,97,239,0.2)]' : 'bg-red-500/10 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.2)]'
         }`}>
-          <span className={`h-2 w-2 rounded-full animate-ping ${isPlayerTurn ? 'bg-primary' : 'bg-red-500'}`}></span>
-          <span className={`text-xs font-black uppercase tracking-[0.2em] ${isPlayerTurn ? 'text-primary' : 'text-red-500'}`}>
-            Command: {activeName}
+          <span className={`h-2 w-2 rounded-full animate-ping ${isPlayerTurn || !isMulti ? 'bg-primary' : 'bg-red-500'}`}></span>
+          <span className={`text-xs font-black uppercase tracking-[0.2em] ${isPlayerTurn || !isMulti ? 'text-primary' : 'text-red-500'}`}>
+            Command: {headerName}
           </span>
         </div>
       </header>
 
       <div className="flex-1 flex gap-8 overflow-hidden">
-        {/* Grids Stacked Vertically */}
         <div className="flex-1 flex flex-col gap-8 overflow-y-auto pr-2 custom-scrollbar">
-            {/* Defensive Grid */}
             <div className="flex flex-col gap-3 animate-fadeIn">
                 <div className="flex justify-between items-center px-2">
-                    <h2 className="text-[10px] font-black tracking-[0.2em] uppercase text-primary/60">Defensive Array // Integrity: {defensiveShips.filter(s=>!isShipSunk(s)).length}/5</h2>
+                    <h2 className="text-[10px] font-black tracking-[0.2em] uppercase text-primary/60">
+                      Fleet: {defensiveLabel} // Integrity: {defensiveShips.filter(s=>!isShipSunk(s)).length}/5
+                    </h2>
                     <span className="text-[8px] font-mono text-white/20">UPLINK_SECURE</span>
                 </div>
                 <div className="p-4 rounded-2xl border border-primary/20 bg-white/5 backdrop-blur-sm flex justify-center">
-                    <GridDisplay grid={defensiveGrid} showShips={true} hitEffect={lastHitPos?.side === (isPlayerTurn ? 'player' : 'ai') ? lastHitPos : null} />
+                    <GridDisplay 
+                      grid={defensiveGrid} 
+                      showShips={true} 
+                      hitEffect={lastHitPos?.side === (showP1Perspective ? 'player' : 'ai') ? lastHitPos : null} 
+                    />
                 </div>
             </div>
 
-            {/* Offensive Grid */}
             <div className="flex flex-col gap-3 animate-fadeIn pb-8">
                 <div className="flex justify-between items-center px-2">
-                    <h2 className="text-[10px] font-black tracking-[0.2em] uppercase text-red-500/60">Offensive HUD // Targets: {offensiveShips.filter(s=>!isShipSunk(s)).length}/5</h2>
+                    <h2 className="text-[10px] font-black tracking-[0.2em] uppercase text-red-500/60">
+                      Strike Zone: {offensiveLabel} // Hostiles: {offensiveShips.filter(s=>!isShipSunk(s)).length}/5
+                    </h2>
                     <span className="text-[8px] font-mono text-white/20">TARGET_LOCKED</span>
                 </div>
                 <div className="p-4 rounded-2xl border border-red-500/20 bg-red-500/5 backdrop-blur-sm flex justify-center">
-                    <GridDisplay grid={offensiveGrid} showShips={false} onClick={handleStrike} hitEffect={lastHitPos?.side === (isPlayerTurn ? 'ai' : 'player') ? lastHitPos : null} />
+                    <GridDisplay 
+                      grid={offensiveGrid} 
+                      showShips={false} 
+                      onClick={handleStrike} 
+                      hitEffect={lastHitPos?.side === (showP1Perspective ? 'ai' : 'player') ? lastHitPos : null} 
+                    />
                 </div>
             </div>
         </div>
 
-        {/* Sidebar: All stats on right */}
         <div className="w-80 shrink-0 flex flex-col gap-5 overflow-y-auto pr-2 custom-scrollbar">
             <div className="grid grid-cols-2 gap-3">
                 <StatCard label="Accuracy" value={`${calculateAccuracy(offensiveGrid)}%`} color="text-primary" />
                 <StatCard label="Ops Progress" value={`${SHIP_ORDER.length - offensiveShips.filter(s=>!isShipSunk(s)).length}/5`} color="text-red-500" />
             </div>
 
-            {/* Target Status Board */}
+            {/* Defensive Fleet Status (Player's Fleet) */}
+            <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 flex flex-col gap-4 shadow-[inset_0_0_15px_rgba(31,97,239,0.1)]">
+                <h3 className="text-[10px] text-primary/70 uppercase font-black tracking-widest border-b border-primary/10 pb-2">Command Fleet Status: {defensiveLabel}</h3>
+                <div className="flex flex-col gap-2">
+                    {SHIP_ORDER.map(type => {
+                        const ship = defensiveShips.find(s => s.type === type);
+                        const isSunk = ship && isShipSunk(ship);
+                        return (
+                            <div key={type} className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-all duration-500 ${
+                                isSunk ? 'bg-black/40 border-red-500/30 opacity-60' : 'bg-primary/10 border-primary/20'
+                            }`}>
+                                <div className="flex items-center gap-2">
+                                    <span className={`material-symbols-outlined text-sm ${isSunk ? 'text-red-500/60' : 'text-primary'}`}>
+                                        {SHIPS[type].icon}
+                                    </span>
+                                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isSunk ? 'text-white/30 line-through' : 'text-white/80'}`}>{type}</span>
+                                </div>
+                                {isSunk ? <span className="text-[8px] font-black text-red-500/60">DESTROYED</span> : <span className="text-[8px] text-primary/60 font-black">OPERATIONAL</span>}
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+
+            {/* Hostile Fleet Status */}
             <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 flex flex-col gap-4">
-                <h3 className="text-[10px] text-red-500/70 uppercase font-black tracking-widest border-b border-red-500/10 pb-2">Hostile Fleet Intelligence</h3>
+                <h3 className="text-[10px] text-red-500/70 uppercase font-black tracking-widest border-b border-red-500/10 pb-2">Fleet Intelligence: {offensiveLabel}</h3>
                 <div className="flex flex-col gap-2">
                     {SHIP_ORDER.map(type => {
                         const ship = offensiveShips.find(s => s.type === type);
@@ -259,7 +296,6 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
                 </div>
             </div>
 
-            {/* Combat Log */}
             <div className="flex-1 bg-black/40 border border-white/5 rounded-xl p-4 font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col gap-1.5 shadow-inner min-h-[150px]">
                 {gameState.logs.map((log, i) => (
                     <div key={i} className={`flex gap-3 ${log.type === 'enemy' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-primary/70'}`}>
