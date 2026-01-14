@@ -41,13 +41,14 @@ export interface GameState {
   player1Name: string;
   player2Name: string;
   playerGrid: CellState[][];
-  aiGrid: CellState[][]; // Used as Player 2 grid in Multiplayer
+  aiGrid: CellState[][]; 
   playerShips: PlacedShip[];
-  aiShips: PlacedShip[]; // Used as Player 2 ships in Multiplayer
-  turn: 'player' | 'ai'; // 'player' is P1, 'ai' is AI or P2
+  aiShips: PlacedShip[]; 
+  turn: 'player' | 'ai'; 
   winner: 'player' | 'ai' | null;
   logs: LogEntry[];
   geminiEnabled: boolean;
   isTransitioning: boolean;
-  placementPhase: 1 | 2; // Tracks which player is placing ships
+  placementPhase: 1 | 2;
+  shotCounter: number; // New: triggers AI effect even if turn remains 'ai'
 }

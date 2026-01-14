@@ -26,6 +26,7 @@ const App: React.FC = () => {
     geminiEnabled: true,
     isTransitioning: false,
     placementPhase: 1,
+    shotCounter: 0,
   });
 
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'system') => {
@@ -55,7 +56,8 @@ const App: React.FC = () => {
       logs: [],
       turn: 'player',
       placementPhase: 1,
-      isTransitioning: false
+      isTransitioning: false,
+      shotCounter: 0
     }));
     addLog(`INITIALIZING ${mode === 'single' ? 'SOLO' : 'DUAL'} OPS PROTOCOL...`, "system");
   };
@@ -68,7 +70,7 @@ const App: React.FC = () => {
         playerShips: ships,
         playerGrid: grid,
         placementPhase: 2,
-        isTransitioning: true // Blur between placements
+        isTransitioning: true
       }));
     } else {
       setState(prev => ({
@@ -76,7 +78,8 @@ const App: React.FC = () => {
         screen: 'playing',
         [state.placementPhase === 1 ? 'playerShips' : 'aiShips']: ships,
         [state.placementPhase === 1 ? 'playerGrid' : 'aiGrid']: grid,
-        isTransitioning: state.mode === 'multi'
+        isTransitioning: state.mode === 'multi',
+        shotCounter: 0
       }));
       addLog("ALL VESSELS DEPLOYED. READY FOR ENGAGEMENT.", "system");
     }
@@ -88,7 +91,7 @@ const App: React.FC = () => {
 
   const resetToMenu = () => {
     sound.playUI();
-    setState(prev => ({ ...prev, screen: 'menu', winner: null, isTransitioning: false }));
+    setState(prev => ({ ...prev, screen: 'menu', winner: null, isTransitioning: false, shotCounter: 0 }));
   };
 
   return (
