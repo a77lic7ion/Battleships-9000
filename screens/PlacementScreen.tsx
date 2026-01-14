@@ -164,10 +164,15 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
         </div>
       )}
 
-      <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 border-l-4 border-primary pl-4 sm:pl-6 mb-6 sm:mb-8">
-        <div>
-          <h1 className="text-white text-3xl sm:text-5xl font-black tracking-tighter uppercase leading-none">Deployment</h1>
-          <p className="text-primary/60 text-sm sm:text-lg font-light tracking-wide italic mt-1 uppercase">Commander: <span className="text-primary font-black">{activeName}</span></p>
+      <div className="flex flex-col sm:flex-row items-start sm:items-end justify-between gap-4 border-l-4 border-primary pl-4 sm:pl-6 mb-6 sm:mb-8 relative">
+        <div className="flex items-center gap-6">
+          <div className="hidden sm:block size-20 bg-primary/10 rounded-2xl border border-primary/20 p-3 shadow-[0_0_30px_rgba(31,97,239,0.2)]">
+            <img src="/logo.png" alt="" className="w-full h-full object-contain" />
+          </div>
+          <div>
+            <h1 className="text-white text-3xl sm:text-5xl font-black tracking-tighter uppercase leading-none">Deployment</h1>
+            <p className="text-primary/60 text-sm sm:text-lg font-light tracking-wide italic mt-1 uppercase">Commander: <span className="text-primary font-black">{activeName}</span></p>
+          </div>
         </div>
         <div className="flex gap-3 w-full sm:w-auto">
           <button onClick={handleRandomize} className="flex-1 sm:flex-none px-4 sm:px-6 h-10 sm:h-12 rounded-lg bg-primary/10 border border-primary/30 text-primary text-[10px] sm:text-xs font-black uppercase tracking-widest hover:bg-primary/20 flex items-center justify-center gap-2">
@@ -244,16 +249,16 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
 
         <section className="flex-1 flex flex-col gap-4 order-1 lg:order-2">
           <div className="relative bg-[#0d1c2b] border-2 border-primary/20 p-4 sm:p-8 rounded-2xl overflow-hidden shadow-2xl flex-1 flex flex-col justify-center min-h-[400px]">
-            <div className="flex justify-center relative touch-none">
-              <div className="grid grid-cols-11 gap-0.5 sm:gap-1 relative grid-container">
-                <div className="w-6 h-6 sm:w-8 sm:h-8 grid-cell-size"></div>
+            <div className="flex justify-center relative touch-none w-full max-w-[min(80vw,65vh)] mx-auto aspect-square">
+              <div className="grid grid-cols-11 gap-0.5 sm:gap-1 relative w-full h-full">
+                <div className="aspect-square"></div>
                 {['A','B','C','D','E','F','G','H','I','J'].map(l => (
-                  <div key={l} className="w-6 h-6 sm:w-8 sm:h-8 grid-cell-size flex items-center justify-center text-[8px] sm:text-[10px] font-bold text-gray-500 opacity-30">{l}</div>
+                  <div key={l} className="aspect-square flex items-center justify-center text-[8px] sm:text-[10px] md:text-xs font-bold text-gray-500 opacity-30">{l}</div>
                 ))}
                 
                 {grid.map((row, y) => (
                   <React.Fragment key={y}>
-                    <div className="w-6 h-6 sm:w-8 sm:h-8 grid-cell-size flex items-center justify-center text-[8px] sm:text-[10px] font-bold text-gray-500 opacity-30">{y+1}</div>
+                    <div className="aspect-square flex items-center justify-center text-[8px] sm:text-[10px] md:text-xs font-bold text-gray-500 opacity-30">{y+1}</div>
                     {row.map((cell, x) => {
                       const currentActionShipType = selectedShip || dragState?.type;
                       const isHovering = hoverPos && currentActionShipType && (
@@ -272,7 +277,7 @@ const PlacementScreen: React.FC<PlacementScreenProps> = ({ gameState, onReady, o
                           onMouseLeave={() => setHoverPos(null)}
                           onClick={() => handleCellClick(x, y)}
                           onPointerDown={(e) => handlePointerDownGrid(e, x, y)}
-                          className={`w-6 h-6 sm:w-8 sm:h-8 grid-cell-size rounded-sm border relative transition-all ${
+                          className={`aspect-square rounded-sm border relative transition-all overflow-hidden ${
                             cell.status === 'ship' ? 'bg-primary/20 border-primary/30' :
                             isGhostValid ? 'bg-green-500/20 border-green-500/60 shadow-[0_0_10px_rgba(34,197,94,0.3)]' :
                             isHovering ? 'bg-red-500/30 border-red-500 animate-pulse' :

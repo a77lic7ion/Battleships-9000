@@ -64,11 +64,39 @@ class AudioService {
 
   playSunk() {
     this.init();
-    for(let i=0; i<3; i++) {
-      setTimeout(() => {
-        this.playHit();
-      }, i * 150);
+    this.playExplosion();
+  }
+
+  playExplosion() {
+    this.init();
+    // Low frequency thump
+    const osc = this.ctx!.createOscillator();
+    const gain = this.createGain(0.8, 0.001, 1.5);
+    
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(100, this.ctx!.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(20, this.ctx!.currentTime + 1.0);
+    
+    osc.connect(gain);
+    gain.connect(this.ctx!.destination);
+    
+    osc.start();
+    osc.stop(this.ctx!.currentTime + 1.5);
+
+    // Crackle/Noise for explosion
+    const bufferSize = this.ctx!.sampleRate * 1.0;
+    const buffer = this.ctx!.createBuffer(1, bufferSize, this.ctx!.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / bufferSize);
     }
+    
+    const noise = this.ctx!.createBufferSource();
+    noise.buffer = buffer;
+    const noiseGain = this.createGain(0.4, 0.001, 1.0);
+    noise.connect(noiseGain);
+    noiseGain.connect(this.ctx!.destination);
+    noise.start();
   }
 
   playUI() {

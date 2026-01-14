@@ -96,7 +96,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="relative min-h-screen w-full bg-background-dark overflow-hidden flex flex-col">
+    <div className="relative h-screen w-screen bg-background-dark overflow-hidden flex flex-col">
       <div className="scanline"></div>
       
       {state.screen === 'menu' && (

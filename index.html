@@ -29,11 +29,28 @@
                         'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
                         'ping-slow': 'ping 2s cubic-bezier(0, 0, 0.2, 1) infinite',
                         'fadeIn': 'fadeIn 0.5s ease-out forwards',
+                        'shake': 'shake 0.5s cubic-bezier(.36,.07,.19,.97) both',
+                        'expand': 'expand 1s ease-out forwards',
+                        'progress': 'progress 3s linear forwards',
                     },
                     keyframes: {
                         fadeIn: {
                             '0%': { opacity: '0' },
                             '100%': { opacity: '1' },
+                        },
+                        shake: {
+                            '10%, 90%': { transform: 'translate3d(-1px, 0, 0)' },
+                            '20%, 80%': { transform: 'translate3d(2px, 0, 0)' },
+                            '30%, 50%, 70%': { transform: 'translate3d(-4px, 0, 0)' },
+                            '40%, 60%': { transform: 'translate3d(4px, 0, 0)' },
+                        },
+                        expand: {
+                            '0%': { transform: 'scale(0.5)', opacity: '1' },
+                            '100%': { transform: 'scale(2)', opacity: '0' },
+                        },
+                        progress: {
+                            '0%': { width: '100%' },
+                            '100%': { width: '0%' },
                         }
                     }
                 },

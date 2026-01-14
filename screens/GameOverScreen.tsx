@@ -23,7 +23,7 @@ const GameOverScreen: React.FC<GameOverScreenProps> = ({ gameState, onReEngage, 
         </h1>
       </div>
 
-      <div className="relative w-full max-w-[800px] bg-[#111c30]/90 backdrop-blur-xl border border-primary/30 rounded-xl overflow-hidden shadow-[0_0_50px_rgba(31,97,239,0.15)]">
+      <div className="relative w-full max-w-4xl bg-[#111c30]/90 backdrop-blur-xl border border-primary/30 rounded-xl overflow-hidden shadow-[0_0_50px_rgba(31,97,239,0.15)]">
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary to-transparent opacity-50"></div>
         <div className="p-8">
           <div className="flex items-center justify-between mb-8 border-b border-white/5 pb-4">
