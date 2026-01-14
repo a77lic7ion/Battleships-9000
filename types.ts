@@ -21,6 +21,7 @@ export interface PlacedShip {
   size: number;
   horizontal: boolean;
   hits: number;
+  shielded?: boolean;
 }
 
 export type Difficulty = 'easy' | 'medium' | 'hard';

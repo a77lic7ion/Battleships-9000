@@ -4,6 +4,7 @@ import { GameState, LogEntry, PlacedShip, CellState, ShipType } from '../types';
 import { SHIPS, SHIP_ORDER, GRID_SIZE } from '../constants';
 import { getAIShot, isShipSunk } from '../services/gameLogic';
 import { sound } from '../services/audioService';
+import { CP_EARNINGS, POWERUPS, PowerUpType } from '../powerups';
 
 interface BattleScreenProps {
   gameState: GameState;
@@ -14,6 +15,9 @@ interface BattleScreenProps {
 
 const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog, onGameOver }) => {
   const [lastHitPos, setLastHitPos] = useState<{x: number, y: number, side: 'player' | 'ai'} | null>(null);
+  const [activePowerUp, setActivePowerUp] = useState<PowerUpType | null>(null);
+  const [sonarScanArea, setSonarScanArea] = useState<{x: number, y: number}[] | null>(null);
+  const [tridentMissileCoords, setTridentMissileCoords] = useState<{x: number, y: number} | null>(null);
   const aiFiringRef = useRef(false);
 
   const checkGameOver = useCallback((ships: PlacedShip[]) => {
@@ -85,6 +89,44 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
     aiFiringRef.current = false;
   }, [gameState.turn, gameState.winner, isMulti, gameState.playerGrid, gameState.playerShips, gameState.difficulty, setState, addLog, onGameOver, checkGameOver]);
 
+  const handlePowerUp = (type: PowerUpType) => {
+    if (gameState.isTransitioning || gameState.winner || activePowerUp) return;
+    const playerCP = isPlayerTurn ? gameState.player1CP : gameState.player2CP;
+    if (playerCP >= POWERUPS[type].cost) {
+      sound.playUI();
+      setActivePowerUp(type);
+      addLog(`Power-up engaged: ${type}. Select target.`, 'system');
+    } else {
+      addLog(`Insufficient CP for ${type}. Cost: ${POWERUPS[type].cost}`, 'enemy');
+    }
+  };
+
+  const handleDefensiveClick = (x: number, y: number) => {
+    if (activePowerUp !== 'Aegis Shield') return;
+
+    const gridKey = isPlayerTurn ? 'playerGrid' : 'aiGrid';
+    const shipsKey = isPlayerTurn ? 'playerShips' : 'aiShips';
+    const cell = gameState[gridKey][y][x];
+
+    if (cell.status === 'ship' && cell.shipType) {
+      const ships = [...gameState[shipsKey]];
+      const shipIndex = ships.findIndex(s => s.type === cell.shipType);
+      if (shipIndex > -1 && !ships[shipIndex].shielded) {
+        ships[shipIndex] = { ...ships[shipIndex], shielded: true };
+        const cpToUpdate = isPlayerTurn ? 'player1CP' : 'player2CP';
+        setState(prev => ({
+          ...prev,
+          [shipsKey]: ships,
+          [cpToUpdate]: prev[cpToUpdate] - POWERUPS['Aegis Shield'].cost
+        }));
+        addLog(`Aegis Shield deployed on your ${cell.shipType} at ${String.fromCharCode(65 + x)}-${y + 1}.`, 'success');
+        setActivePowerUp(null);
+      }
+    } else {
+      addLog('Shield must be placed on an operational vessel.', 'enemy');
+    }
+  };
+
   useEffect(() => {
     if (gameState.turn === 'ai' && !gameState.winner && !aiFiringRef.current && !isMulti) {
       aiFiringRef.current = true;
@@ -95,6 +137,43 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
 
   const handleStrike = (x: number, y: number) => {
     if (gameState.isTransitioning || gameState.winner || (gameState.turn === 'ai' && !isMulti)) return;
+
+    if (activePowerUp) {
+      const playerCP = isPlayerTurn ? gameState.player1CP : gameState.player2CP;
+      const cost = POWERUPS[activePowerUp].cost;
+      if (playerCP < cost) {
+        addLog(`Insufficient CP for ${activePowerUp}.`, 'enemy');
+        setActivePowerUp(null);
+        return;
+      }
+
+      const cpToUpdate = isPlayerTurn ? 'player1CP' : 'player2CP';
+      setState(prev => ({ ...prev, [cpToUpdate]: prev[cpToUpdate] - cost }));
+
+      if (activePowerUp === 'Sonar Scan') {
+        const area = [];
+        for (let i = -1; i <= 1; i++) {
+          for (let j = -1; j <= 1; j++) {
+            const scanX = x + i;
+            const scanY = y + j;
+            if (scanX >= 0 && scanX < GRID_SIZE && scanY >= 0 && scanY < GRID_SIZE) {
+              area.push({ x: scanX, y: scanY });
+            }
+          }
+        }
+        setSonarScanArea(area);
+        setTimeout(() => setSonarScanArea(null), 2000);
+        addLog(`Sonar scan at ${String.fromCharCode(65 + x)}-${y + 1} revealed.`, 'success');
+        setActivePowerUp(null);
+        return; // Sonar scan does not end the turn
+      }
+
+      if (activePowerUp === 'Trident Missile') {
+        setTridentMissileCoords({ x, y });
+        addLog('Trident Missile targeting. Select orientation.', 'system');
+        return;
+      }
+    }
 
     const targetGridKey = isPlayerTurn ? 'aiGrid' : 'playerGrid';
     const targetShipsKey = isPlayerTurn ? 'aiShips' : 'playerShips';
@@ -108,23 +187,35 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
     let msg = `${activeName} strikes ${String.fromCharCode(65 + x)}-${y + 1}... `;
     let type: LogEntry['type'] = 'player';
     let continueTurn = false;
+    let cpGained = 0;
 
     if (cell.status === 'ship') {
-      targetGrid[y][x].status = 'hit';
-      sound.playHit();
-      triggerHitEffect(x, y, isPlayerTurn ? 'ai' : 'player');
-      const ship = targetShips.find(s => s.type === cell.shipType);
-      if (ship) {
-        ship.hits++;
-        if (isShipSunk(ship)) {
-          sound.playSunk();
-          msg += `CONFIRMED! ${ship.type.toUpperCase()} neutralised.`;
-          type = 'success';
-        } else {
-          msg += 'DIRECT HIT!';
+      const shipIndex = targetShips.findIndex(s => s.type === cell.shipType);
+      if (shipIndex > -1 && targetShips[shipIndex].shielded) {
+        targetShips[shipIndex] = { ...targetShips[shipIndex], shielded: false };
+        sound.playMiss();
+        msg += 'SHIELD HIT! The strike was absorbed.';
+        type = 'enemy';
+        continueTurn = false;
+      } else {
+        targetGrid[y][x].status = 'hit';
+        sound.playHit();
+        triggerHitEffect(x, y, isPlayerTurn ? 'ai' : 'player');
+        cpGained = CP_EARNINGS.HIT;
+        const ship = targetShips.find(s => s.type === cell.shipType);
+        if (ship) {
+          ship.hits++;
+          if (isShipSunk(ship)) {
+            sound.playSunk();
+            cpGained += CP_EARNINGS.SINK[ship.type];
+            msg += `CONFIRMED! ${ship.type.toUpperCase()} neutralised. (+${cpGained} CP)`;
+            type = 'success';
+          } else {
+            msg += `DIRECT HIT! (+${cpGained} CP)`;
+          }
         }
+        continueTurn = true;
       }
-      continueTurn = true;
     } else {
       targetGrid[y][x].status = 'miss';
       sound.playMiss();
@@ -137,10 +228,12 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
     if (checkGameOver(targetShips)) {
       onGameOver(isPlayerTurn ? 'player' : 'ai');
     } else {
-      setState(prev => ({ 
-        ...prev, 
-        [targetGridKey]: targetGrid, 
-        [targetShipsKey]: targetShips, 
+      const cpToUpdate = isPlayerTurn ? 'player1CP' : 'player2CP';
+      setState(prev => ({
+        ...prev,
+        [targetGridKey]: targetGrid,
+        [targetShipsKey]: targetShips,
+        [cpToUpdate]: prev[cpToUpdate] + cpGained,
         turn: continueTurn ? prev.turn : (isPlayerTurn ? 'ai' : 'player'),
         isTransitioning: !continueTurn && isMulti,
         shotCounter: prev.shotCounter + 1
@@ -164,6 +257,72 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
   const offensiveShips = showP1Perspective ? gameState.aiShips : gameState.playerShips;
   const defensiveLabel = showP1Perspective ? gameState.player1Name : gameState.player2Name;
   const offensiveLabel = showP1Perspective ? (isMulti ? gameState.player2Name : "ENEMY") : gameState.player1Name;
+
+  const executeTridentMissile = (orientation: 'h' | 'v') => {
+    if (!tridentMissileCoords) return;
+    const { x, y } = tridentMissileCoords;
+    addLog(`Trident Missile launched at ${String.fromCharCode(65 + x)}-${y + 1}!`, 'success');
+    setActivePowerUp(null);
+    setTridentMissileCoords(null);
+
+    const targetGridKey = isPlayerTurn ? 'aiGrid' : 'playerGrid';
+    const targetShipsKey = isPlayerTurn ? 'aiShips' : 'playerShips';
+    const grid = [...gameState[targetGridKey].map(row => [...row])];
+    const ships = [...gameState[targetShipsKey].map(s => ({ ...s }))];
+    let totalCpGained = 0;
+    let anyHit = false;
+
+    const coords = orientation === 'v'
+      ? [{ x, y: y - 1 }, { x, y }, { x, y: y + 1 }]
+      : [{ x: x - 1, y }, { x, y }, { x: x + 1, y }];
+
+    coords.forEach(({ x: cx, y: cy }) => {
+      if (cx < 0 || cx >= GRID_SIZE || cy < 0 || cy >= GRID_SIZE) return;
+
+      const cell = grid[cy][cx];
+      if (cell.status === 'hit' || cell.status === 'miss') return;
+
+      let msg = `${activeName} strikes ${String.fromCharCode(65 + cx)}-${cy + 1}... `;
+
+      if (cell.status === 'ship') {
+        grid[cy][cx].status = 'hit';
+        anyHit = true;
+        sound.playHit();
+        triggerHitEffect(cx, cy, isPlayerTurn ? 'ai' : 'player');
+        totalCpGained += CP_EARNINGS.HIT;
+        const ship = ships.find(s => s.type === cell.shipType);
+        if (ship) {
+          ship.hits++;
+          if (isShipSunk(ship)) {
+            sound.playSunk();
+            totalCpGained += CP_EARNINGS.SINK[ship.type];
+            msg += `SUNK ${ship.type.toUpperCase()}!`;
+          } else {
+            msg += 'HIT!';
+          }
+        }
+      } else {
+        grid[cy][cx].status = 'miss';
+        sound.playMiss();
+        msg += 'MISS.';
+      }
+      addLog(msg, 'player');
+    });
+
+    if (checkGameOver(ships)) {
+      onGameOver(isPlayerTurn ? 'player' : 'ai');
+    } else {
+      const cpToUpdate = isPlayerTurn ? 'player1CP' : 'player2CP';
+      setState(prev => ({
+        ...prev,
+        [targetGridKey]: grid,
+        [targetShipsKey]: ships,
+        [cpToUpdate]: prev[cpToUpdate] + totalCpGained,
+        turn: anyHit ? prev.turn : (isPlayerTurn ? 'ai' : 'player'),
+        isTransitioning: !anyHit && isMulti
+      }));
+    }
+  };
 
   return (
     <div className="flex-1 flex flex-col p-4 sm:p-6 gap-4 sm:gap-6 relative z-10 overflow-hidden h-full">
@@ -294,9 +453,9 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
                 Abort Mission
             </button>
         </div>
-      </div>
+    </div>
 
-      <style>{`
+    <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(31, 97, 239, 0.2); border-radius: 10px; }
@@ -330,13 +489,14 @@ const GridDisplay: React.FC<{ grid: CellState[][], showShips: boolean, onClick?:
           const isHitCell = hitEffect?.x === x && hitEffect?.y === y;
           const isInteractive = onClick && cell.status !== 'hit' && cell.status !== 'miss';
           return (
-            <div 
+            <div
               key={`${x}-${y}`}
               onClick={() => isInteractive && onClick(x, y)}
               className={`w-6 h-6 sm:w-8 sm:h-8 grid-cell-size rounded-sm border relative transition-all duration-300 ${
                 isInteractive ? 'cursor-crosshair hover:bg-red-500/20 hover:border-red-500/50 touch-manipulation' : ''
               } ${
-                cell.status === 'hit' ? 'bg-red-500/20 border-red-500/50' : 
+                isScanned ? 'bg-blue-500/20 border-blue-500/50' :
+                cell.status === 'hit' ? 'bg-red-500/20 border-red-500/50' :
                 cell.status === 'miss' ? 'bg-white/5 border-white/10' :
                 (cell.status === 'ship' && showShips) ? 'bg-primary/20 border-primary/30 shadow-[inset_0_0_5px_rgba(31,97,239,0.3)]' : 'bg-white/5 border-white/10'
               }`}
@@ -364,6 +524,43 @@ const StatCard: React.FC<{ label: string, value: string, color: string }> = ({ l
   <div className="bg-white/5 border border-white/10 p-3 sm:p-4 rounded-xl flex-1 flex flex-col items-center shadow-inner">
     <div className="text-[8px] sm:text-[9px] text-gray-500 uppercase font-black tracking-[0.2em] mb-1">{label}</div>
     <div className={`text-lg sm:text-xl font-black ${color}`}>{value}</div>
+  </div>
+);
+
+const PowerUpControls: React.FC<{ onActivate: (type: PowerUpType) => void, activePowerUp: PowerUpType | null, playerCP: number }> = ({ onActivate, activePowerUp, playerCP }) => (
+  <div className="bg-black/40 border border-white/5 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
+    <div className="flex justify-between items-center border-b border-white/10 pb-2">
+      <h3 className="text-[10px] text-primary/70 uppercase font-black tracking-widest">Power-Ups</h3>
+      <div className="flex items-center gap-2">
+        <span className="material-symbols-outlined text-primary text-base">local_fire_department</span>
+        <span className="text-primary font-black">{playerCP} CP</span>
+      </div>
+    </div>
+    <div className="grid grid-cols-3 gap-2">
+      {(Object.keys(POWERUPS) as PowerUpType[]).map(type => {
+        const powerUp = POWERUPS[type];
+        const isActive = activePowerUp === type;
+        const canAfford = playerCP >= powerUp.cost;
+        return (
+          <button
+            key={type}
+            onClick={() => onActivate(type)}
+            disabled={!canAfford || !!activePowerUp}
+            className={`p-2 rounded-lg flex flex-col items-center gap-1 text-center border transition-all ${
+              isActive ? 'bg-primary/30 border-primary shadow-lg' : 'bg-white/5 border-white/10'
+            } ${
+              !canAfford || (activePowerUp && !isActive) ? 'opacity-40 grayscale cursor-not-allowed' : 'hover:bg-primary/10'
+            }`}
+          >
+            <span className="material-symbols-outlined text-xl">{
+              type === 'Aegis Shield' ? 'shield' : type === 'Sonar Scan' ? 'radar' : 'rocket_launch'
+            }</span>
+            <span className="text-[9px] font-bold uppercase">{type}</span>
+            <span className="text-[8px] font-mono text-primary/60">{powerUp.cost} CP</span>
+          </button>
+        );
+      })}
+    </div>
   </div>
 );
 

@@ -26,7 +26,8 @@ const App: React.FC = () => {
     geminiEnabled: true,
     isTransitioning: false,
     placementPhase: 1,
-    shotCounter: 0,
+    player1CP: 0,
+    player2CP: 0,
   });
 
   const addLog = useCallback((message: string, type: LogEntry['type'] = 'system') => {
