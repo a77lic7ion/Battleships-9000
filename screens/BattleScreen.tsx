@@ -37,7 +37,10 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
   const headerName = !isMulti ? gameState.player1Name : activeName;
 
   const processAIShot = useCallback(() => {
-    if (gameState.turn !== 'ai' || gameState.winner || isMulti) return;
+    if (gameState.turn !== 'ai' || gameState.winner || isMulti) {
+      aiFiringRef.current = false;
+      return;
+    }
 
     const { x, y } = getAIShot(gameState.playerGrid, gameState.difficulty);
     const playerGrid = [...gameState.playerGrid.map(row => [...row])];
@@ -79,7 +82,8 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
         ...prev, 
         playerGrid, 
         playerShips, 
-        turn: continueTurn ? 'ai' : 'player' 
+        turn: continueTurn ? 'ai' : 'player',
+        shotCounter: prev.shotCounter + 1 // New: force effect re-trigger
       }));
     }
     aiFiringRef.current = false;
@@ -129,10 +133,10 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
       const timer = setTimeout(processAIShot, 1200);
       return () => clearTimeout(timer);
     }
-  }, [gameState.turn, gameState.winner, isMulti, processAIShot]);
+  }, [gameState.turn, gameState.winner, isMulti, processAIShot, gameState.shotCounter]); // Added shotCounter
 
   const handleStrike = (x: number, y: number) => {
-    if (gameState.isTransitioning || gameState.winner) return;
+    if (gameState.isTransitioning || gameState.winner || (gameState.turn === 'ai' && !isMulti)) return;
 
     if (activePowerUp) {
       const playerCP = isPlayerTurn ? gameState.player1CP : gameState.player2CP;
@@ -231,7 +235,8 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
         [targetShipsKey]: targetShips,
         [cpToUpdate]: prev[cpToUpdate] + cpGained,
         turn: continueTurn ? prev.turn : (isPlayerTurn ? 'ai' : 'player'),
-        isTransitioning: !continueTurn && isMulti
+        isTransitioning: !continueTurn && isMulti,
+        shotCounter: prev.shotCounter + 1
       }));
     }
   };
@@ -320,51 +325,23 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
   };
 
   return (
-    <div className="flex-1 flex flex-col p-6 gap-6 relative z-10 overflow-hidden">
-      {tridentMissileCoords && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background-dark/95 backdrop-blur-3xl animate-fadeIn">
-          <div className="bg-terminal-accent/60 border border-primary/40 p-12 rounded-2xl flex flex-col items-center gap-8 shadow-2xl max-w-sm text-center">
-            <span className="material-symbols-outlined text-7xl text-primary animate-pulse">rocket_launch</span>
-            <div>
-              <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Select Orientation</h2>
-              <p className="text-primary/60 text-[10px] font-black uppercase tracking-widest leading-relaxed">
-                Choose the missile's attack pattern.
-              </p>
-            </div>
-            <div className="flex gap-4">
-              <button
-                onClick={() => executeTridentMissile('h')}
-                className="px-12 h-14 bg-primary text-white font-black uppercase tracking-widest rounded-lg shadow-lg hover:brightness-110 active:scale-95 transition-all"
-              >
-                Horizontal
-              </button>
-              <button
-                onClick={() => executeTridentMissile('v')}
-                className="px-12 h-14 bg-primary text-white font-black uppercase tracking-widest rounded-lg shadow-lg hover:brightness-110 active:scale-95 transition-all"
-              >
-                Vertical
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+    <div className="flex-1 flex flex-col p-4 sm:p-6 gap-4 sm:gap-6 relative z-10 overflow-hidden h-full">
       {gameState.isTransitioning && isMulti && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background-dark/95 backdrop-blur-3xl animate-fadeIn">
-          <div className="bg-terminal-accent/60 border border-primary/40 p-12 rounded-2xl flex flex-col items-center gap-8 shadow-2xl max-w-sm text-center">
-            <span className="material-symbols-outlined text-7xl text-primary animate-pulse">sync_alt</span>
+          <div className="bg-terminal-accent/60 border border-primary/40 p-8 sm:p-12 rounded-2xl flex flex-col items-center gap-6 sm:gap-8 shadow-2xl max-w-sm text-center">
+            <span className="material-symbols-outlined text-6xl sm:text-7xl text-primary animate-pulse">sync_alt</span>
             <div>
-              <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Turn Switch</h2>
+              <h2 className="text-white text-xl sm:text-2xl font-black uppercase tracking-widest mb-2">Turn Switch</h2>
               <p className="text-primary/60 text-[10px] font-black uppercase tracking-widest leading-relaxed">
-                Clear all displays.<br/>Commander access required:
+                Commander access required:
               </p>
-              <h3 className="text-primary text-3xl font-black italic mt-4 uppercase drop-shadow-[0_0_10px_rgba(31,97,239,0.5)]">
+              <h3 className="text-primary text-2xl sm:text-3xl font-black italic mt-4 uppercase drop-shadow-[0_0_10px_rgba(31,97,239,0.5)]">
                 {activeName}
               </h3>
             </div>
             <button 
               onClick={() => { sound.playUI(); setState(p => ({ ...p, isTransitioning: false })); }}
-              className="px-12 h-14 bg-primary text-white font-black uppercase tracking-widest rounded-lg shadow-lg hover:brightness-110 active:scale-95 transition-all"
+              className="px-10 sm:px-12 h-12 sm:h-14 bg-primary text-white font-black uppercase tracking-widest rounded-lg shadow-lg hover:brightness-110 active:scale-95 transition-all"
             >
               Take Command
             </button>
@@ -373,136 +350,105 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
       )}
 
       <header className="flex items-center justify-between border-b border-white/10 pb-4">
-        <div className="flex items-center gap-4">
-          <div className="size-10 bg-primary/20 rounded-lg flex items-center justify-center border border-primary/50">
-            <span className="material-symbols-outlined text-primary text-2xl">sailing</span>
+        <div className="flex items-center gap-3 sm:gap-4">
+          <div className="size-8 sm:size-10 bg-primary/20 rounded-lg flex items-center justify-center border border-primary/50">
+            <span className="material-symbols-outlined text-primary text-xl sm:text-2xl">sailing</span>
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-widest uppercase italic">BATTLESHIPS 9K</h1>
-            <p className="text-[9px] text-primary/60 tracking-[0.3em] font-black uppercase">Active Operation: {isMulti ? 'PVP_LOCAL' : 'SOLO_INTEL'}</p>
+            <h1 className="text-lg sm:text-xl font-bold tracking-widest uppercase italic">BATTLESHIPS 9K</h1>
+            <p className="text-[8px] sm:text-[9px] text-primary/60 tracking-[0.3em] font-black uppercase hidden sm:block">Active Ops: {isMulti ? 'PVP' : 'SOLO'}</p>
           </div>
         </div>
         
-        <div className={`relative flex items-center gap-4 px-8 py-2 rounded-full border transition-all duration-700 ${
+        <div className={`relative flex items-center gap-3 sm:gap-4 px-4 sm:px-8 py-2 rounded-full border transition-all duration-700 ${
           isPlayerTurn || !isMulti ? 'bg-primary/10 border-primary shadow-[0_0_20px_rgba(31,97,239,0.2)]' : 'bg-red-500/10 border-red-500 shadow-[0_0_20px_rgba(239,68,68,0.2)]'
         }`}>
           <span className={`h-2 w-2 rounded-full animate-ping ${isPlayerTurn || !isMulti ? 'bg-primary' : 'bg-red-500'}`}></span>
-          <span className={`text-xs font-black uppercase tracking-[0.2em] ${isPlayerTurn || !isMulti ? 'text-primary' : 'text-red-500'}`}>
-            Command: {headerName}
+          <span className={`text-[10px] sm:text-xs font-black uppercase tracking-[0.2em] ${isPlayerTurn || !isMulti ? 'text-primary' : 'text-red-500'}`}>
+            {headerName}
           </span>
         </div>
       </header>
 
-      <div className="flex-1 flex gap-8 overflow-hidden">
-        <div className="flex-1 flex flex-col gap-8 overflow-y-auto pr-2 custom-scrollbar">
-            <div className="flex flex-col gap-3 animate-fadeIn">
+      <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden">
+        <div className="flex-1 flex flex-col gap-6 sm:gap-8 overflow-y-auto pr-2 custom-scrollbar">
+            <div className="flex flex-col gap-2 sm:gap-3 animate-fadeIn">
                 <div className="flex justify-between items-center px-2">
-                    <h2 className="text-[10px] font-black tracking-[0.2em] uppercase text-primary/60">
-                      Fleet: {defensiveLabel} // Integrity: {defensiveShips.filter(s=>!isShipSunk(s)).length}/5
+                    <h2 className="text-[8px] sm:text-[10px] font-black tracking-[0.2em] uppercase text-primary/60">
+                      Fleet: {defensiveLabel}
                     </h2>
-                    <span className="text-[8px] font-mono text-white/20">UPLINK_SECURE</span>
+                    <span className="text-[7px] sm:text-[8px] font-mono text-white/20">UPLINK_SECURE</span>
                 </div>
-                <div className="p-4 rounded-2xl border border-primary/20 bg-white/5 backdrop-blur-sm flex justify-center">
-                    <GridDisplay
-                        grid={defensiveGrid}
-                        showShips={true}
-                        hitEffect={lastHitPos?.side === (showP1Perspective ? 'player' : 'ai') ? lastHitPos : null}
-                        onDefensiveClick={handleDefensiveClick}
+                <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-primary/20 bg-white/5 backdrop-blur-sm flex justify-center">
+                    <GridDisplay 
+                      grid={defensiveGrid} 
+                      showShips={true} 
+                      hitEffect={lastHitPos?.side === (showP1Perspective ? 'player' : 'ai') ? lastHitPos : null} 
                     />
                 </div>
             </div>
 
-            <div className="flex flex-col gap-3 animate-fadeIn pb-8">
+            <div className="flex flex-col gap-2 sm:gap-3 animate-fadeIn pb-8">
                 <div className="flex justify-between items-center px-2">
-                    <h2 className="text-[10px] font-black tracking-[0.2em] uppercase text-red-500/60">
-                        Strike Zone: {offensiveLabel} // Hostiles: {offensiveShips.filter(s => !isShipSunk(s)).length}/5
+                    <h2 className="text-[8px] sm:text-[10px] font-black tracking-[0.2em] uppercase text-red-500/60">
+                      Strike Zone: {offensiveLabel}
                     </h2>
-                    <span className="text-[8px] font-mono text-white/20">TARGET_LOCKED</span>
+                    <span className="text-[7px] sm:text-[8px] font-mono text-white/20">TARGET_LOCKED</span>
                 </div>
-                <div className="p-4 rounded-2xl border border-red-500/20 bg-red-500/5 backdrop-blur-sm flex justify-center">
-                    <GridDisplay
-                        grid={offensiveGrid}
-                        showShips={false}
-                        onClick={handleStrike}
-                        hitEffect={lastHitPos?.side === (showP1Perspective ? 'ai' : 'player') ? lastHitPos : null}
-                        sonarScanArea={sonarScanArea}
+                <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl border border-red-500/20 bg-red-500/5 backdrop-blur-sm flex justify-center">
+                    <GridDisplay 
+                      grid={offensiveGrid} 
+                      showShips={false} 
+                      onClick={handleStrike} 
+                      hitEffect={lastHitPos?.side === (showP1Perspective ? 'ai' : 'player') ? lastHitPos : null} 
                     />
                 </div>
             </div>
         </div>
 
-        <div className="w-80 shrink-0 flex flex-col gap-5 overflow-y-auto pr-2 custom-scrollbar">
+        <div className="w-full lg:w-80 shrink-0 flex flex-col gap-4 sm:gap-5 overflow-y-auto lg:pr-2 custom-scrollbar">
             <div className="grid grid-cols-2 gap-3">
                 <StatCard label="Accuracy" value={`${calculateAccuracy(offensiveGrid)}%`} color="text-primary" />
-                <StatCard label="Ops Progress" value={`${SHIP_ORDER.length - offensiveShips.filter(s => !isShipSunk(s)).length}/5`} color="text-red-500" />
+                <StatCard label="Ships Sunk" value={`${SHIP_ORDER.length - offensiveShips.filter(s=>!isShipSunk(s)).length}/5`} color="text-red-500" />
             </div>
 
-            <PowerUpControls
-                onActivate={handlePowerUp}
-                activePowerUp={activePowerUp}
-                playerCP={isPlayerTurn ? gameState.player1CP : gameState.player2CP}
-            />
-
-            {/* Defensive Fleet Status (Player's Fleet) */}
-            <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 flex flex-col gap-4 shadow-[inset_0_0_15px_rgba(31,97,239,0.1)]">
-                <h3 className="text-[10px] text-primary/70 uppercase font-black tracking-widest border-b border-primary/10 pb-2">Command Fleet Status: {defensiveLabel}</h3>
-                <div className="flex flex-col gap-2">
-                    {SHIP_ORDER.map(type => {
-                        const ship = defensiveShips.find(s => s.type === type);
-                        const isSunk = ship && isShipSunk(ship);
-                        return (
-                            <div key={type} className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-all duration-500 ${
-                                isSunk ? 'bg-black/40 border-red-500/30 opacity-60' : 'bg-primary/10 border-primary/20'
-                            }`}>
-                                <div className="flex items-center gap-2">
-                                    <span className={`material-symbols-outlined text-sm ${isSunk ? 'text-red-500/60' : 'text-primary'}`}>
-                                        {SHIPS[type].icon}
-                                    </span>
-                                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isSunk ? 'text-white/30 line-through' : 'text-white/80'}`}>{type}</span>
-                                </div>
-                                {isSunk ? <span className="text-[8px] font-black text-red-500/60">DESTROYED</span> : <span className="text-[8px] text-primary/60 font-black">OPERATIONAL</span>}
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-
-            {/* Hostile Fleet Status */}
-            <div className="bg-red-500/5 border border-red-500/20 rounded-2xl p-5 flex flex-col gap-4">
-                <h3 className="text-[10px] text-red-500/70 uppercase font-black tracking-widest border-b border-red-500/10 pb-2">Fleet Intelligence: {offensiveLabel}</h3>
-                <div className="flex flex-col gap-2">
-                    {SHIP_ORDER.map(type => {
-                        const ship = offensiveShips.find(s => s.type === type);
-                        const isSunk = ship && isShipSunk(ship);
-                        return (
-                            <div key={type} className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-all duration-500 ${
-                                isSunk ? 'bg-red-500/20 border-red-500/50 shadow-inner' : 'bg-white/5 border-white/5 opacity-40 grayscale'
-                            }`}>
-                                <div className="flex items-center gap-2">
-                                    <span className={`material-symbols-outlined text-sm ${isSunk ? 'text-red-500' : 'text-white/20'}`}>
-                                        {SHIPS[type].icon}
-                                    </span>
-                                    <span className="text-[10px] font-bold uppercase tracking-wider text-white/80">{type}</span>
-                                </div>
-                                {isSunk ? <span className="text-[8px] font-black text-red-500 animate-pulse">SUNK</span> : <span className="text-[8px] opacity-20 italic">ACTIVE</span>}
-                            </div>
-                        );
-                    })}
-                </div>
-            </div>
-
-            <div className="flex-1 bg-black/40 border border-white/5 rounded-xl p-4 font-mono text-[10px] overflow-y-auto custom-scrollbar flex flex-col gap-1.5 shadow-inner min-h-[150px]">
+            <div className="bg-black/40 border border-white/5 rounded-xl p-4 font-mono text-[9px] sm:text-[10px] h-32 sm:h-40 overflow-y-auto custom-scrollbar flex flex-col gap-1.5 shadow-inner">
                 {gameState.logs.map((log, i) => (
-                    <div key={i} className={`flex gap-3 ${log.type === 'enemy' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-primary/70'}`}>
+                    <div key={i} className={`flex gap-2 sm:gap-3 ${log.type === 'enemy' ? 'text-red-400' : log.type === 'success' ? 'text-green-400' : 'text-primary/70'}`}>
                         <span className="opacity-30">[{log.timestamp}]</span>
                         <span className="flex-1 leading-tight">{log.message}</span>
                     </div>
                 ))}
             </div>
 
-            <button
+            <div className="hidden lg:flex flex-col gap-4">
+                <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 flex flex-col gap-4 shadow-[inset_0_0_15px_rgba(31,97,239,0.1)]">
+                    <h3 className="text-[10px] text-primary/70 uppercase font-black tracking-widest border-b border-primary/10 pb-2">Fleet: {defensiveLabel}</h3>
+                    <div className="flex flex-col gap-2">
+                        {SHIP_ORDER.map(type => {
+                            const ship = defensiveShips.find(s => s.type === type);
+                            const isSunk = ship && isShipSunk(ship);
+                            return (
+                                <div key={type} className={`flex items-center justify-between px-3 py-2 rounded-lg border transition-all duration-500 ${
+                                    isSunk ? 'bg-black/40 border-red-500/30 opacity-60' : 'bg-primary/10 border-primary/20'
+                                }`}>
+                                    <div className="flex items-center gap-2">
+                                        <span className={`material-symbols-outlined text-sm ${isSunk ? 'text-red-500/60' : 'text-primary'}`}>
+                                            {SHIPS[type].icon}
+                                        </span>
+                                        <span className={`text-[10px] font-bold uppercase tracking-wider ${isSunk ? 'text-white/30 line-through' : 'text-white/80'}`}>{type}</span>
+                                    </div>
+                                    {isSunk ? <span className="text-[8px] font-black text-red-500/60">SUNK</span> : <span className="text-[8px] text-primary/60 font-black">OK</span>}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            </div>
+
+            <button 
                 onClick={() => setState(p => ({ ...p, screen: 'menu' }))}
-                className="w-full h-12 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-white/40 hover:bg-white/10 hover:text-white transition-all"
+                className="w-full h-12 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-white/40 hover:bg-white/10 hover:text-white transition-all mt-auto"
             >
                 Abort Mission
             </button>
@@ -515,7 +461,7 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(31, 97, 239, 0.2); border-radius: 10px; }
         @keyframes explosion {
           0% { transform: scale(0.5); opacity: 1; border-radius: 50%; }
-          100% { transform: scale(3); opacity: 0; border-radius: 50%; }
+          100% { transform: scale(2.5); opacity: 0; border-radius: 50%; }
         }
         .hit-animation {
           position: absolute;
@@ -530,52 +476,40 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
   );
 };
 
-const GridDisplay: React.FC<{
-  grid: CellState[][],
-  showShips: boolean,
-  onClick?: (x: number, y: number) => void,
-  onDefensiveClick?: (x: number, y: number) => void,
-  hitEffect: { x: number, y: number } | null,
-  sonarScanArea?: { x: number, y: number }[] | null
-}> = ({ grid, showShips, onClick, onDefensiveClick, hitEffect, sonarScanArea }) => (
-  <div className="grid grid-cols-11 gap-1">
-    <div className="w-8 h-8"></div>
-    {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].map(l => (
-      <div key={l} className="w-8 h-8 flex items-center justify-center text-[10px] font-bold text-gray-500 opacity-30">{l}</div>
+const GridDisplay: React.FC<{ grid: CellState[][], showShips: boolean, onClick?: (x: number, y: number) => void, hitEffect: {x: number, y: number} | null }> = ({ grid, showShips, onClick, hitEffect }) => (
+  <div className="grid grid-cols-11 gap-0.5 sm:gap-1 grid-container">
+    <div className="w-6 h-6 sm:w-8 sm:h-8 grid-cell-size"></div>
+    {['A','B','C','D','E','F','G','H','I','J'].map(l => (
+      <div key={l} className="w-6 h-6 sm:w-8 sm:h-8 grid-cell-size flex items-center justify-center text-[8px] sm:text-[10px] font-bold text-gray-500 opacity-30">{l}</div>
     ))}
     {grid.map((row, y) => (
       <React.Fragment key={y}>
-        <div className="w-8 h-8 flex items-center justify-center text-[10px] font-bold text-gray-500 opacity-30">{y + 1}</div>
+        <div className="w-6 h-6 sm:w-8 sm:h-8 grid-cell-size flex items-center justify-center text-[8px] sm:text-[10px] font-bold text-gray-500 opacity-30">{y + 1}</div>
         {row.map((cell, x) => {
           const isHitCell = hitEffect?.x === x && hitEffect?.y === y;
-          const isScanned = sonarScanArea?.some(pos => pos.x === x && pos.y === y);
-          const cellContent = isScanned && cell.status === 'ship'
-            ? <span className="material-symbols-outlined text-primary text-lg">directions_boat</span>
-            : null;
-
+          const isInteractive = onClick && cell.status !== 'hit' && cell.status !== 'miss';
           return (
             <div
               key={`${x}-${y}`}
-              onClick={() => onDefensiveClick ? onDefensiveClick(x, y) : onClick && onClick(x, y)}
-              className={`w-8 h-8 rounded-sm border relative transition-all duration-300 ${
-                (onClick || onDefensiveClick) && cell.status !== 'hit' && cell.status !== 'miss' ? 'cursor-pointer hover:bg-red-500/20 hover:border-red-500/50' : ''
+              onClick={() => isInteractive && onClick(x, y)}
+              className={`w-6 h-6 sm:w-8 sm:h-8 grid-cell-size rounded-sm border relative transition-all duration-300 ${
+                isInteractive ? 'cursor-crosshair hover:bg-red-500/20 hover:border-red-500/50 touch-manipulation' : ''
               } ${
                 isScanned ? 'bg-blue-500/20 border-blue-500/50' :
                 cell.status === 'hit' ? 'bg-red-500/20 border-red-500/50' :
                 cell.status === 'miss' ? 'bg-white/5 border-white/10' :
-                (cell.status === 'ship' && showShips) ? 'bg-primary/20 border-primary/30' : 'bg-white/5 border-white/10'
+                (cell.status === 'ship' && showShips) ? 'bg-primary/20 border-primary/30 shadow-[inset_0_0_5px_rgba(31,97,239,0.3)]' : 'bg-white/5 border-white/10'
               }`}
             >
               {isHitCell && <div className="hit-animation"></div>}
-              {cellContent}
-              {cell.status === 'hit' && !isScanned && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="material-symbols-outlined text-hit text-xs">close</span>
+              {cell.status === 'hit' && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="material-symbols-outlined text-hit text-[10px] sm:text-xs">close</span>
                 </div>
               )}
-              {cell.status === 'miss' && !isScanned && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="size-1 bg-white/20 rounded-full"></div>
+              {cell.status === 'miss' && (
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="size-1 bg-white/30 rounded-full"></div>
                 </div>
               )}
             </div>
@@ -587,9 +521,9 @@ const GridDisplay: React.FC<{
 );
 
 const StatCard: React.FC<{ label: string, value: string, color: string }> = ({ label, value, color }) => (
-  <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex-1 flex flex-col items-center shadow-inner">
-    <div className="text-[9px] text-gray-500 uppercase font-black tracking-[0.2em] mb-1">{label}</div>
-    <div className={`text-xl font-black ${color}`}>{value}</div>
+  <div className="bg-white/5 border border-white/10 p-3 sm:p-4 rounded-xl flex-1 flex flex-col items-center shadow-inner">
+    <div className="text-[8px] sm:text-[9px] text-gray-500 uppercase font-black tracking-[0.2em] mb-1">{label}</div>
+    <div className={`text-lg sm:text-xl font-black ${color}`}>{value}</div>
   </div>
 );
 
