@@ -1,4 +1,3 @@
-
 # Battleships 9000
 
 **Battleships 9000** is a high-fidelity, futuristic naval combat simulator built with modern web technologies. It features a tactical terminal interface, advanced AI with multi-stage hunting logic, and integration with the Google Gemini API for real-time tactical commentary.
@@ -10,7 +9,10 @@
   - **Single Player Mode**: Face off against a recursive AI core with three difficulty levels (Easy, Medium, Hard).
   - **Hunting Logic**: The AI aggressively identifies and neutralizes partially hit ships using neighbor-search and orientation-detection algorithms.
 - **Local Multiplayer**: Engage in secret tactical maneuvers with a friend on the same device, featuring secure handover transitions to keep your fleet positions private.
-- **Drag-and-Drop Deployment**: Smoothly drag vessels from your armory onto the tactical grid or reposition existing ships with intuitive pointer controls.
+- **Interactive Deployment Interface**:
+  - **Ghost Previews**: Real-time valid (green) and invalid (red) placement feedback as you position your fleet.
+  - **Command Mode**: Click a placed vessel to activate it. Drag vessels to relocate them or use interactive rotation handles for precise orientation.
+  - **Random Deployment**: Quick-start with randomized fleet positioning while retaining the ability to fine-tune placement afterwards.
 - **Gemini AI Integration**: Receive real-time, context-aware tactical insights and taunts from an advanced neural-net command core (requires Gemini API Key).
 - **Immersive Soundscapes**: Dynamic UI sounds and combat effects built using the Web Audio API.
 
@@ -46,7 +48,7 @@ To enable the **Gemini Tactical Feedback** feature:
 ## 🎮 How to Play
 
 1. **Initialize**: Choose Single Player or Local Multiplayer from the Main Menu.
-2. **Deploy**: Drag your fleet (Carrier, Battleship, Destroyer, Submarine, Patrol Boat) onto the coordinate grid. Use the **Flip Axis** button or just click to rotate.
+2. **Deploy**: Select ships from the armory and click coordinates on the grid. Drag placed vessels to move them or tap their rotation handles in Command Mode.
 3. **Engage**: Take turns striking coordinates on the enemy's grid. Red crosses indicate a hit; white markers indicate a miss.
 4. **Win**: Sink all five enemy vessels to secure naval supremacy.
 
