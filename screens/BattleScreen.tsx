@@ -4,6 +4,7 @@ import { GameState, LogEntry, PlacedShip, CellState, ShipType } from '../types';
 import { SHIPS, SHIP_ORDER, GRID_SIZE } from '../constants';
 import { getAIShot, isShipSunk } from '../services/gameLogic';
 import { sound } from '../services/audioService';
+import { CP_EARNINGS, POWERUPS, PowerUpType } from '../powerups';
 
 interface BattleScreenProps {
   gameState: GameState;
@@ -14,6 +15,9 @@ interface BattleScreenProps {
 
 const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog, onGameOver }) => {
   const [lastHitPos, setLastHitPos] = useState<{x: number, y: number, side: 'player' | 'ai'} | null>(null);
+  const [activePowerUp, setActivePowerUp] = useState<PowerUpType | null>(null);
+  const [sonarScanArea, setSonarScanArea] = useState<{x: number, y: number}[] | null>(null);
+  const [tridentMissileCoords, setTridentMissileCoords] = useState<{x: number, y: number} | null>(null);
   const aiFiringRef = useRef(false);
 
   const checkGameOver = useCallback((ships: PlacedShip[]) => {
@@ -81,6 +85,44 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
     aiFiringRef.current = false;
   }, [gameState.turn, gameState.winner, isMulti, gameState.playerGrid, gameState.playerShips, gameState.difficulty, setState, addLog, onGameOver, checkGameOver]);
 
+  const handlePowerUp = (type: PowerUpType) => {
+    if (gameState.isTransitioning || gameState.winner || activePowerUp) return;
+    const playerCP = isPlayerTurn ? gameState.player1CP : gameState.player2CP;
+    if (playerCP >= POWERUPS[type].cost) {
+      sound.playUI();
+      setActivePowerUp(type);
+      addLog(`Power-up engaged: ${type}. Select target.`, 'system');
+    } else {
+      addLog(`Insufficient CP for ${type}. Cost: ${POWERUPS[type].cost}`, 'enemy');
+    }
+  };
+
+  const handleDefensiveClick = (x: number, y: number) => {
+    if (activePowerUp !== 'Aegis Shield') return;
+
+    const gridKey = isPlayerTurn ? 'playerGrid' : 'aiGrid';
+    const shipsKey = isPlayerTurn ? 'playerShips' : 'aiShips';
+    const cell = gameState[gridKey][y][x];
+
+    if (cell.status === 'ship' && cell.shipType) {
+      const ships = [...gameState[shipsKey]];
+      const shipIndex = ships.findIndex(s => s.type === cell.shipType);
+      if (shipIndex > -1 && !ships[shipIndex].shielded) {
+        ships[shipIndex] = { ...ships[shipIndex], shielded: true };
+        const cpToUpdate = isPlayerTurn ? 'player1CP' : 'player2CP';
+        setState(prev => ({
+          ...prev,
+          [shipsKey]: ships,
+          [cpToUpdate]: prev[cpToUpdate] - POWERUPS['Aegis Shield'].cost
+        }));
+        addLog(`Aegis Shield deployed on your ${cell.shipType} at ${String.fromCharCode(65 + x)}-${y + 1}.`, 'success');
+        setActivePowerUp(null);
+      }
+    } else {
+      addLog('Shield must be placed on an operational vessel.', 'enemy');
+    }
+  };
+
   useEffect(() => {
     if (gameState.turn === 'ai' && !gameState.winner && !aiFiringRef.current && !isMulti) {
       aiFiringRef.current = true;
@@ -91,6 +133,43 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
 
   const handleStrike = (x: number, y: number) => {
     if (gameState.isTransitioning || gameState.winner) return;
+
+    if (activePowerUp) {
+      const playerCP = isPlayerTurn ? gameState.player1CP : gameState.player2CP;
+      const cost = POWERUPS[activePowerUp].cost;
+      if (playerCP < cost) {
+        addLog(`Insufficient CP for ${activePowerUp}.`, 'enemy');
+        setActivePowerUp(null);
+        return;
+      }
+
+      const cpToUpdate = isPlayerTurn ? 'player1CP' : 'player2CP';
+      setState(prev => ({ ...prev, [cpToUpdate]: prev[cpToUpdate] - cost }));
+
+      if (activePowerUp === 'Sonar Scan') {
+        const area = [];
+        for (let i = -1; i <= 1; i++) {
+          for (let j = -1; j <= 1; j++) {
+            const scanX = x + i;
+            const scanY = y + j;
+            if (scanX >= 0 && scanX < GRID_SIZE && scanY >= 0 && scanY < GRID_SIZE) {
+              area.push({ x: scanX, y: scanY });
+            }
+          }
+        }
+        setSonarScanArea(area);
+        setTimeout(() => setSonarScanArea(null), 2000);
+        addLog(`Sonar scan at ${String.fromCharCode(65 + x)}-${y + 1} revealed.`, 'success');
+        setActivePowerUp(null);
+        return; // Sonar scan does not end the turn
+      }
+
+      if (activePowerUp === 'Trident Missile') {
+        setTridentMissileCoords({ x, y });
+        addLog('Trident Missile targeting. Select orientation.', 'system');
+        return;
+      }
+    }
 
     const targetGridKey = isPlayerTurn ? 'aiGrid' : 'playerGrid';
     const targetShipsKey = isPlayerTurn ? 'aiShips' : 'playerShips';
@@ -104,23 +183,35 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
     let msg = `${activeName} strikes ${String.fromCharCode(65 + x)}-${y + 1}... `;
     let type: LogEntry['type'] = 'player';
     let continueTurn = false;
+    let cpGained = 0;
 
     if (cell.status === 'ship') {
-      targetGrid[y][x].status = 'hit';
-      sound.playHit();
-      triggerHitEffect(x, y, isPlayerTurn ? 'ai' : 'player');
-      const ship = targetShips.find(s => s.type === cell.shipType);
-      if (ship) {
-        ship.hits++;
-        if (isShipSunk(ship)) {
-          sound.playSunk();
-          msg += `CONFIRMED! ${ship.type.toUpperCase()} neutralised.`;
-          type = 'success';
-        } else {
-          msg += 'DIRECT HIT!';
+      const shipIndex = targetShips.findIndex(s => s.type === cell.shipType);
+      if (shipIndex > -1 && targetShips[shipIndex].shielded) {
+        targetShips[shipIndex] = { ...targetShips[shipIndex], shielded: false };
+        sound.playMiss();
+        msg += 'SHIELD HIT! The strike was absorbed.';
+        type = 'enemy';
+        continueTurn = false;
+      } else {
+        targetGrid[y][x].status = 'hit';
+        sound.playHit();
+        triggerHitEffect(x, y, isPlayerTurn ? 'ai' : 'player');
+        cpGained = CP_EARNINGS.HIT;
+        const ship = targetShips.find(s => s.type === cell.shipType);
+        if (ship) {
+          ship.hits++;
+          if (isShipSunk(ship)) {
+            sound.playSunk();
+            cpGained += CP_EARNINGS.SINK[ship.type];
+            msg += `CONFIRMED! ${ship.type.toUpperCase()} neutralised. (+${cpGained} CP)`;
+            type = 'success';
+          } else {
+            msg += `DIRECT HIT! (+${cpGained} CP)`;
+          }
         }
+        continueTurn = true;
       }
-      continueTurn = true;
     } else {
       targetGrid[y][x].status = 'miss';
       sound.playMiss();
@@ -133,10 +224,12 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
     if (checkGameOver(targetShips)) {
       onGameOver(isPlayerTurn ? 'player' : 'ai');
     } else {
-      setState(prev => ({ 
-        ...prev, 
-        [targetGridKey]: targetGrid, 
-        [targetShipsKey]: targetShips, 
+      const cpToUpdate = isPlayerTurn ? 'player1CP' : 'player2CP';
+      setState(prev => ({
+        ...prev,
+        [targetGridKey]: targetGrid,
+        [targetShipsKey]: targetShips,
+        [cpToUpdate]: prev[cpToUpdate] + cpGained,
         turn: continueTurn ? prev.turn : (isPlayerTurn ? 'ai' : 'player'),
         isTransitioning: !continueTurn && isMulti
       }));
@@ -160,8 +253,102 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
   const defensiveLabel = showP1Perspective ? gameState.player1Name : gameState.player2Name;
   const offensiveLabel = showP1Perspective ? (isMulti ? gameState.player2Name : "ENEMY") : gameState.player1Name;
 
+  const executeTridentMissile = (orientation: 'h' | 'v') => {
+    if (!tridentMissileCoords) return;
+    const { x, y } = tridentMissileCoords;
+    addLog(`Trident Missile launched at ${String.fromCharCode(65 + x)}-${y + 1}!`, 'success');
+    setActivePowerUp(null);
+    setTridentMissileCoords(null);
+
+    const targetGridKey = isPlayerTurn ? 'aiGrid' : 'playerGrid';
+    const targetShipsKey = isPlayerTurn ? 'aiShips' : 'playerShips';
+    const grid = [...gameState[targetGridKey].map(row => [...row])];
+    const ships = [...gameState[targetShipsKey].map(s => ({ ...s }))];
+    let totalCpGained = 0;
+    let anyHit = false;
+
+    const coords = orientation === 'v'
+      ? [{ x, y: y - 1 }, { x, y }, { x, y: y + 1 }]
+      : [{ x: x - 1, y }, { x, y }, { x: x + 1, y }];
+
+    coords.forEach(({ x: cx, y: cy }) => {
+      if (cx < 0 || cx >= GRID_SIZE || cy < 0 || cy >= GRID_SIZE) return;
+
+      const cell = grid[cy][cx];
+      if (cell.status === 'hit' || cell.status === 'miss') return;
+
+      let msg = `${activeName} strikes ${String.fromCharCode(65 + cx)}-${cy + 1}... `;
+
+      if (cell.status === 'ship') {
+        grid[cy][cx].status = 'hit';
+        anyHit = true;
+        sound.playHit();
+        triggerHitEffect(cx, cy, isPlayerTurn ? 'ai' : 'player');
+        totalCpGained += CP_EARNINGS.HIT;
+        const ship = ships.find(s => s.type === cell.shipType);
+        if (ship) {
+          ship.hits++;
+          if (isShipSunk(ship)) {
+            sound.playSunk();
+            totalCpGained += CP_EARNINGS.SINK[ship.type];
+            msg += `SUNK ${ship.type.toUpperCase()}!`;
+          } else {
+            msg += 'HIT!';
+          }
+        }
+      } else {
+        grid[cy][cx].status = 'miss';
+        sound.playMiss();
+        msg += 'MISS.';
+      }
+      addLog(msg, 'player');
+    });
+
+    if (checkGameOver(ships)) {
+      onGameOver(isPlayerTurn ? 'player' : 'ai');
+    } else {
+      const cpToUpdate = isPlayerTurn ? 'player1CP' : 'player2CP';
+      setState(prev => ({
+        ...prev,
+        [targetGridKey]: grid,
+        [targetShipsKey]: ships,
+        [cpToUpdate]: prev[cpToUpdate] + totalCpGained,
+        turn: anyHit ? prev.turn : (isPlayerTurn ? 'ai' : 'player'),
+        isTransitioning: !anyHit && isMulti
+      }));
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col p-6 gap-6 relative z-10 overflow-hidden">
+      {tridentMissileCoords && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center bg-background-dark/95 backdrop-blur-3xl animate-fadeIn">
+          <div className="bg-terminal-accent/60 border border-primary/40 p-12 rounded-2xl flex flex-col items-center gap-8 shadow-2xl max-w-sm text-center">
+            <span className="material-symbols-outlined text-7xl text-primary animate-pulse">rocket_launch</span>
+            <div>
+              <h2 className="text-white text-2xl font-black uppercase tracking-widest mb-2">Select Orientation</h2>
+              <p className="text-primary/60 text-[10px] font-black uppercase tracking-widest leading-relaxed">
+                Choose the missile's attack pattern.
+              </p>
+            </div>
+            <div className="flex gap-4">
+              <button
+                onClick={() => executeTridentMissile('h')}
+                className="px-12 h-14 bg-primary text-white font-black uppercase tracking-widest rounded-lg shadow-lg hover:brightness-110 active:scale-95 transition-all"
+              >
+                Horizontal
+              </button>
+              <button
+                onClick={() => executeTridentMissile('v')}
+                className="px-12 h-14 bg-primary text-white font-black uppercase tracking-widest rounded-lg shadow-lg hover:brightness-110 active:scale-95 transition-all"
+              >
+                Vertical
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {gameState.isTransitioning && isMulti && (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-background-dark/95 backdrop-blur-3xl animate-fadeIn">
           <div className="bg-terminal-accent/60 border border-primary/40 p-12 rounded-2xl flex flex-col items-center gap-8 shadow-2xl max-w-sm text-center">
@@ -216,10 +403,11 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
                     <span className="text-[8px] font-mono text-white/20">UPLINK_SECURE</span>
                 </div>
                 <div className="p-4 rounded-2xl border border-primary/20 bg-white/5 backdrop-blur-sm flex justify-center">
-                    <GridDisplay 
-                      grid={defensiveGrid} 
-                      showShips={true} 
-                      hitEffect={lastHitPos?.side === (showP1Perspective ? 'player' : 'ai') ? lastHitPos : null} 
+                    <GridDisplay
+                        grid={defensiveGrid}
+                        showShips={true}
+                        hitEffect={lastHitPos?.side === (showP1Perspective ? 'player' : 'ai') ? lastHitPos : null}
+                        onDefensiveClick={handleDefensiveClick}
                     />
                 </div>
             </div>
@@ -227,16 +415,17 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
             <div className="flex flex-col gap-3 animate-fadeIn pb-8">
                 <div className="flex justify-between items-center px-2">
                     <h2 className="text-[10px] font-black tracking-[0.2em] uppercase text-red-500/60">
-                      Strike Zone: {offensiveLabel} // Hostiles: {offensiveShips.filter(s=>!isShipSunk(s)).length}/5
+                        Strike Zone: {offensiveLabel} // Hostiles: {offensiveShips.filter(s => !isShipSunk(s)).length}/5
                     </h2>
                     <span className="text-[8px] font-mono text-white/20">TARGET_LOCKED</span>
                 </div>
                 <div className="p-4 rounded-2xl border border-red-500/20 bg-red-500/5 backdrop-blur-sm flex justify-center">
-                    <GridDisplay 
-                      grid={offensiveGrid} 
-                      showShips={false} 
-                      onClick={handleStrike} 
-                      hitEffect={lastHitPos?.side === (showP1Perspective ? 'ai' : 'player') ? lastHitPos : null} 
+                    <GridDisplay
+                        grid={offensiveGrid}
+                        showShips={false}
+                        onClick={handleStrike}
+                        hitEffect={lastHitPos?.side === (showP1Perspective ? 'ai' : 'player') ? lastHitPos : null}
+                        sonarScanArea={sonarScanArea}
                     />
                 </div>
             </div>
@@ -245,8 +434,14 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
         <div className="w-80 shrink-0 flex flex-col gap-5 overflow-y-auto pr-2 custom-scrollbar">
             <div className="grid grid-cols-2 gap-3">
                 <StatCard label="Accuracy" value={`${calculateAccuracy(offensiveGrid)}%`} color="text-primary" />
-                <StatCard label="Ops Progress" value={`${SHIP_ORDER.length - offensiveShips.filter(s=>!isShipSunk(s)).length}/5`} color="text-red-500" />
+                <StatCard label="Ops Progress" value={`${SHIP_ORDER.length - offensiveShips.filter(s => !isShipSunk(s)).length}/5`} color="text-red-500" />
             </div>
+
+            <PowerUpControls
+                onActivate={handlePowerUp}
+                activePowerUp={activePowerUp}
+                playerCP={isPlayerTurn ? gameState.player1CP : gameState.player2CP}
+            />
 
             {/* Defensive Fleet Status (Player's Fleet) */}
             <div className="bg-primary/5 border border-primary/20 rounded-2xl p-5 flex flex-col gap-4 shadow-[inset_0_0_15px_rgba(31,97,239,0.1)]">
@@ -305,16 +500,16 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
                 ))}
             </div>
 
-            <button 
+            <button
                 onClick={() => setState(p => ({ ...p, screen: 'menu' }))}
                 className="w-full h-12 bg-white/5 border border-white/10 rounded-xl text-[10px] font-black uppercase tracking-widest text-white/40 hover:bg-white/10 hover:text-white transition-all"
             >
                 Abort Mission
             </button>
         </div>
-      </div>
+    </div>
 
-      <style>{`
+    <style>{`
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(31, 97, 239, 0.2); border-radius: 10px; }
@@ -335,10 +530,17 @@ const BattleScreen: React.FC<BattleScreenProps> = ({ gameState, setState, addLog
   );
 };
 
-const GridDisplay: React.FC<{ grid: CellState[][], showShips: boolean, onClick?: (x: number, y: number) => void, hitEffect: {x: number, y: number} | null }> = ({ grid, showShips, onClick, hitEffect }) => (
+const GridDisplay: React.FC<{
+  grid: CellState[][],
+  showShips: boolean,
+  onClick?: (x: number, y: number) => void,
+  onDefensiveClick?: (x: number, y: number) => void,
+  hitEffect: { x: number, y: number } | null,
+  sonarScanArea?: { x: number, y: number }[] | null
+}> = ({ grid, showShips, onClick, onDefensiveClick, hitEffect, sonarScanArea }) => (
   <div className="grid grid-cols-11 gap-1">
     <div className="w-8 h-8"></div>
-    {['A','B','C','D','E','F','G','H','I','J'].map(l => (
+    {['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'].map(l => (
       <div key={l} className="w-8 h-8 flex items-center justify-center text-[10px] font-bold text-gray-500 opacity-30">{l}</div>
     ))}
     {grid.map((row, y) => (
@@ -346,25 +548,32 @@ const GridDisplay: React.FC<{ grid: CellState[][], showShips: boolean, onClick?:
         <div className="w-8 h-8 flex items-center justify-center text-[10px] font-bold text-gray-500 opacity-30">{y + 1}</div>
         {row.map((cell, x) => {
           const isHitCell = hitEffect?.x === x && hitEffect?.y === y;
+          const isScanned = sonarScanArea?.some(pos => pos.x === x && pos.y === y);
+          const cellContent = isScanned && cell.status === 'ship'
+            ? <span className="material-symbols-outlined text-primary text-lg">directions_boat</span>
+            : null;
+
           return (
-            <div 
+            <div
               key={`${x}-${y}`}
-              onClick={() => onClick && onClick(x, y)}
+              onClick={() => onDefensiveClick ? onDefensiveClick(x, y) : onClick && onClick(x, y)}
               className={`w-8 h-8 rounded-sm border relative transition-all duration-300 ${
-                onClick && cell.status !== 'hit' && cell.status !== 'miss' ? 'cursor-crosshair hover:bg-red-500/20 hover:border-red-500/50' : ''
+                (onClick || onDefensiveClick) && cell.status !== 'hit' && cell.status !== 'miss' ? 'cursor-pointer hover:bg-red-500/20 hover:border-red-500/50' : ''
               } ${
-                cell.status === 'hit' ? 'bg-red-500/20 border-red-500/50' : 
+                isScanned ? 'bg-blue-500/20 border-blue-500/50' :
+                cell.status === 'hit' ? 'bg-red-500/20 border-red-500/50' :
                 cell.status === 'miss' ? 'bg-white/5 border-white/10' :
                 (cell.status === 'ship' && showShips) ? 'bg-primary/20 border-primary/30' : 'bg-white/5 border-white/10'
               }`}
             >
               {isHitCell && <div className="hit-animation"></div>}
-              {cell.status === 'hit' && (
+              {cellContent}
+              {cell.status === 'hit' && !isScanned && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <span className="material-symbols-outlined text-hit text-xs">close</span>
                 </div>
               )}
-              {cell.status === 'miss' && (
+              {cell.status === 'miss' && !isScanned && (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="size-1 bg-white/20 rounded-full"></div>
                 </div>
@@ -381,6 +590,43 @@ const StatCard: React.FC<{ label: string, value: string, color: string }> = ({ l
   <div className="bg-white/5 border border-white/10 p-4 rounded-xl flex-1 flex flex-col items-center shadow-inner">
     <div className="text-[9px] text-gray-500 uppercase font-black tracking-[0.2em] mb-1">{label}</div>
     <div className={`text-xl font-black ${color}`}>{value}</div>
+  </div>
+);
+
+const PowerUpControls: React.FC<{ onActivate: (type: PowerUpType) => void, activePowerUp: PowerUpType | null, playerCP: number }> = ({ onActivate, activePowerUp, playerCP }) => (
+  <div className="bg-black/40 border border-white/5 rounded-xl p-4 flex flex-col gap-3 shadow-inner">
+    <div className="flex justify-between items-center border-b border-white/10 pb-2">
+      <h3 className="text-[10px] text-primary/70 uppercase font-black tracking-widest">Power-Ups</h3>
+      <div className="flex items-center gap-2">
+        <span className="material-symbols-outlined text-primary text-base">local_fire_department</span>
+        <span className="text-primary font-black">{playerCP} CP</span>
+      </div>
+    </div>
+    <div className="grid grid-cols-3 gap-2">
+      {(Object.keys(POWERUPS) as PowerUpType[]).map(type => {
+        const powerUp = POWERUPS[type];
+        const isActive = activePowerUp === type;
+        const canAfford = playerCP >= powerUp.cost;
+        return (
+          <button
+            key={type}
+            onClick={() => onActivate(type)}
+            disabled={!canAfford || !!activePowerUp}
+            className={`p-2 rounded-lg flex flex-col items-center gap-1 text-center border transition-all ${
+              isActive ? 'bg-primary/30 border-primary shadow-lg' : 'bg-white/5 border-white/10'
+            } ${
+              !canAfford || (activePowerUp && !isActive) ? 'opacity-40 grayscale cursor-not-allowed' : 'hover:bg-primary/10'
+            }`}
+          >
+            <span className="material-symbols-outlined text-xl">{
+              type === 'Aegis Shield' ? 'shield' : type === 'Sonar Scan' ? 'radar' : 'rocket_launch'
+            }</span>
+            <span className="text-[9px] font-bold uppercase">{type}</span>
+            <span className="text-[8px] font-mono text-primary/60">{powerUp.cost} CP</span>
+          </button>
+        );
+      })}
+    </div>
   </div>
 );
 

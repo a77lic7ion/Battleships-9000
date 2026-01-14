@@ -21,6 +21,7 @@ export interface PlacedShip {
   size: number;
   horizontal: boolean;
   hits: number;
+  shielded?: boolean;
 }
 
 export type Difficulty = 'easy' | 'medium' | 'hard';
@@ -50,4 +51,6 @@ export interface GameState {
   geminiEnabled: boolean;
   isTransitioning: boolean;
   placementPhase: 1 | 2; // Tracks which player is placing ships
+  player1CP: number;
+  player2CP: number;
 }
